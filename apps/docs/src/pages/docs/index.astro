@@ -1,0 +1,39 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { nav } from "../../lib/nav";
+---
+
+<BaseLayout title="Specs — weaver" description="The complete design corpus for weaver.">
+  <div class="docs-index">
+    <header class="docs-index__header">
+      <div>
+        <span class="section-marker">§ / Specifications</span>
+        <h1>The design corpus.</h1>
+      </div>
+      <p>
+        Pre-implementation. The specs below are the contract. Start with the PRD; everything
+        else drills into a single concern — architecture, the hard implementation problems,
+        access control, AI agent design — or records a specific decision (ADRs).
+      </p>
+    </header>
+
+    {
+      nav.map((section) => (
+        <section class="docs-index__section">
+          <header class="docs-index__section-header">
+            <span class="docs-index__section-num">§{section.number}</span>
+            <h2 class="docs-index__section-title">{section.title}</h2>
+          </header>
+          <div class="docs-index__grid">
+            {section.items.map((item) => (
+              <a class="docs-index__card" href={`/docs/${item.slug}`}>
+                <span class="docs-index__card-title">{item.label}</span>
+                {item.blurb && <p class="docs-index__card-blurb">{item.blurb}</p>}
+              </a>
+            ))}
+          </div>
+        </section>
+      ))
+    }
+  </div>
+</BaseLayout>

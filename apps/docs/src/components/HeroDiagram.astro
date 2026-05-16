@@ -1,0 +1,54 @@
+---
+// Decorative CRDT-peer-graph SVG for the landing hero.
+// Three peer nodes (user / agent / agent) connecting through a Durable Object
+// — visualizes the AI-as-peer thesis without a real Mermaid render.
+---
+
+<div class="hero__diagram" aria-hidden="true">
+  <svg viewBox="0 0 360 360" xmlns="http://www.w3.org/2000/svg">
+    <!-- Central DO -->
+    <circle class="node" cx="180" cy="180" r="46" />
+    <text class="label" x="180" y="178" text-anchor="middle">DO</text>
+    <text class="label" x="180" y="192" text-anchor="middle">/doc:01H…</text>
+
+    <!-- Top: user peer -->
+    <circle class="node" cx="180" cy="50" r="26" />
+    <text class="label" x="180" y="48" text-anchor="middle">USER</text>
+    <text class="label" x="180" y="60" text-anchor="middle">peer:01</text>
+
+    <!-- Right: agent peer -->
+    <circle class="node agent" cx="310" cy="180" r="22" />
+    <text class="label" x="310" y="178" text-anchor="middle">AGENT</text>
+    <text class="label" x="310" y="190" text-anchor="middle">α</text>
+
+    <!-- Bottom-right: second agent -->
+    <circle class="node agent" cx="265" cy="290" r="20" />
+    <text class="label" x="265" y="288" text-anchor="middle">AGENT</text>
+    <text class="label" x="265" y="299" text-anchor="middle">β</text>
+
+    <!-- Left: collaborator peer -->
+    <circle class="node" cx="50" cy="180" r="24" />
+    <text class="label" x="50" y="178" text-anchor="middle">USER</text>
+    <text class="label" x="50" y="190" text-anchor="middle">peer:02</text>
+
+    <!-- Edges (peers ↔ DO) -->
+    <path class="edge" d="M180 78 L180 134" />
+    <path class="edge agent" d="M288 180 L226 180" />
+    <path class="edge agent" d="M249 273 L210 215" />
+    <path class="edge" d="M74 180 L134 180" />
+
+    <!-- Op flow ticks -->
+    <g class="label" fill="currentColor">
+      <text x="190" y="108" font-size="8">▸ insert</text>
+      <text x="220" y="170" font-size="8">▸ mark</text>
+      <text x="215" y="244" font-size="8">▸ insert</text>
+      <text x="85" y="170" font-size="8">▸ accept</text>
+    </g>
+
+    <!-- Hairline grid -->
+    <g stroke="currentColor" stroke-width="0.25" opacity="0.18">
+      <line x1="0" y1="180" x2="360" y2="180" />
+      <line x1="180" y1="0" x2="180" y2="360" />
+    </g>
+  </svg>
+</div>

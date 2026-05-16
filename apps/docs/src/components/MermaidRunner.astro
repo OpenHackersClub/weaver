@@ -1,0 +1,90 @@
+---
+// Client-side Mermaid renderer. The remark plugin wraps ```mermaid blocks in
+// <div class="mermaid-source" data-source="..."> elements; this script imports
+// mermaid lazily, decodes the source, and renders SVG in place.
+---
+
+<script>
+  import mermaid from "mermaid";
+
+  type Theme = "light" | "dark";
+
+  function configure(theme: Theme) {
+    const isDark = theme === "dark";
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: "base",
+      securityLevel: "strict",
+      fontFamily: 'Iosevka Web, "SF Mono", ui-monospace, monospace',
+      themeVariables: {
+        background: isDark ? "#13141B" : "#FDFBF5",
+        primaryColor: isDark ? "#13141B" : "#FDFBF5",
+        primaryTextColor: isDark ? "#EAE7DD" : "#13131A",
+        primaryBorderColor: isDark ? "#353846" : "#13131A",
+        lineColor: isDark ? "#7A7D8C" : "#5C5C66",
+        secondaryColor: isDark ? "#1A1B26" : "#F4F1EA",
+        tertiaryColor: isDark ? "#11121A" : "#EBE6D8",
+        edgeLabelBackground: isDark ? "#13141B" : "#FDFBF5",
+        clusterBkg: isDark ? "transparent" : "transparent",
+        clusterBorder: isDark ? "#353846" : "#D8D2C5",
+        titleColor: isDark ? "#FF7041" : "#FF3D00",
+        nodeBorder: isDark ? "#353846" : "#13131A",
+        mainBkg: isDark ? "#13141B" : "#FDFBF5",
+        actorBkg: isDark ? "#13141B" : "#FDFBF5",
+        actorBorder: isDark ? "#EAE7DD" : "#13131A",
+        actorTextColor: isDark ? "#EAE7DD" : "#13131A",
+        signalColor: isDark ? "#EAE7DD" : "#13131A",
+        signalTextColor: isDark ? "#EAE7DD" : "#13131A",
+      },
+      flowchart: {
+        curve: "basis",
+        padding: 12,
+        useMaxWidth: true,
+      },
+      sequence: {
+        useMaxWidth: true,
+      },
+    });
+  }
+
+  function currentTheme(): Theme {
+    return (document.documentElement.getAttribute("data-theme") as Theme) || "light";
+  }
+
+  async function renderAll() {
+    const nodes = document.querySelectorAll<HTMLElement>(".mermaid-source");
+    if (nodes.length === 0) return;
+    configure(currentTheme());
+
+    let i = 0;
+    for (const node of nodes) {
+      const raw = node.dataset.source;
+      if (!raw) continue;
+      try {
+        const source = decodeURIComponent(raw);
+        const { svg } = await mermaid.render(`mmd-${Date.now()}-${i++}`, source);
+        node.innerHTML = svg;
+        node.dataset.rendered = "true";
+      } catch (err) {
+        // Leave the <pre class="mermaid-fallback"> visible
+        // eslint-disable-next-line no-console
+        console.warn("mermaid render failed", err);
+      }
+    }
+  }
+
+  // Initial render
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", renderAll);
+  } else {
+    renderAll();
+  }
+
+  // Re-render on theme change
+  window.addEventListener("weaver:theme-change", () => {
+    document.querySelectorAll<HTMLElement>(".mermaid-source").forEach((n) => {
+      n.removeAttribute("data-rendered");
+    });
+    renderAll();
+  });
+</script>

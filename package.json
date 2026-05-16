@@ -1,0 +1,18 @@
+{
+  "name": "weaver",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.12.0",
+  "description": "A TypeScript Notion-style block editor with AI agents as first-class CRDT peers.",
+  "scripts": {
+    "dev": "pnpm --filter @weaver/docs dev",
+    "build": "pnpm --filter @weaver/docs build",
+    "preview": "pnpm --filter @weaver/docs preview",
+    "docs:dev": "pnpm --filter @weaver/docs dev",
+    "docs:build": "pnpm --filter @weaver/docs build"
+  },
+  "engines": {
+    "node": ">=20.18.0"
+  }
+}
