@@ -37,6 +37,11 @@ export const nav: NavSection[] = [
         blurb: "Packages, document model, reactivity, plugin contract.",
       },
       {
+        slug: "block-model",
+        label: "Block Model",
+        blurb: "Block data structure, Loro mapping, Valtio's role, the layering rule.",
+      },
+      {
         slug: "hard-problems",
         label: "Hard Problems",
         blurb: "The eleven genuinely-hard implementation problems.",

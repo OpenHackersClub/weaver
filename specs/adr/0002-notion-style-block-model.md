@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-05-17
-- **Relates to:** Decision D1, [`architecture.md` §2, §5](../architecture.md); [`comparison.md`](../comparison.md)
+- **Relates to:** Decision D1, [`architecture.md` §2, §5](../architecture.md); [`block-model.md`](../block-model.md); [`comparison.md`](../comparison.md)
 
 ## Context
 
@@ -14,100 +14,24 @@ The initial research treated weaver as a generic "rich-text editor with a CRDT d
 
 Scope is **docs only**: typed blocks, nested blocks, block-level operations, slash-command insert, drag handle, per-block metadata, per-block ACL tags, rich inline content (marks, links, mentions) inside text-bearing blocks. Whiteboard / freeform canvas, Database block, and multi-view collection surfaces are not part of v1 — they're separate products and live behind the `embed` block when needed. Rationale and reversibility are in §"Scope boundary" below.
 
-## How blocks work
+The block data structure, its mapping to Loro containers, the block-level command surface, and how plugins extend block kinds are all specified in [`block-model.md`](../block-model.md). This ADR records the *decision*; the spec records the *design*.
 
-### Every block has
+## Why Notion-style blocks specifically
 
-- **A stable ID** — the underlying `LoroTreeNode` ID. Persists across moves, edits, and re-parenting.
-- **A typed `kind`** — `paragraph`, `heading`, `list-item`, `code`, `quote`, `callout`, `divider`, `image`, `embed`, `mention`, plus plugin-registered kinds.
-- **Typed attributes** validated by Effect Schema (per-kind shape). Schema is registered with the block-kind plugin; the editor refuses to apply ops that violate it on the client.
-- **An optional inline content container** — `LoroText` for text-bearing kinds; absent for atomic blocks like `divider` or `image`.
-- **Children** — recursive, via `LoroTree` parent/child edges. Lists, toggles, callouts, table rows all nest this way.
+The block-as-unit model is the right primitive for weaver because:
 
-### Mapping to Loro containers
+- **One unit, many affordances.** A block is the unit of editing, selection, attribution, comments, drag/move, AI-rewrite, and ACL tagging. Folding all of those onto one addressable object means plugin authors think in "block kinds," not in a tree-node mix of block / inline / mark types.
+- **Cleanly maps to Loro.** Each block is a `LoroTreeNode` with a `LoroMap` of typed attrs and (optionally) a `LoroText` for inline content. Structural ops (move, indent, outdent) are native `LoroTree` ops with CRDT semantics defined by Loro — not editor-layer transforms that have to be reconciled across peers.
+- **Natural addressable unit for the AI agent.** The agent operates on `block:01H7…` IDs across turns; tools have a stable, typed referent (`rewrite-block`, `transform-block`, `generate-children`). The agent's view of the doc is the block tree, the same primitive a human collaborator uses.
+- **Stable handle for per-block ACL.** A `subdoc: string` attr on each block routes it to the right tier-partitioned LoroDoc at sync time ([`access-control.md` §5](../access-control.md)). No extra modeling layer.
 
-| Editor concept | Loro container | Notes |
-|---|---|---|
-| Document root | `LoroDoc` | One per logical doc; subdocs partition tiers per [`access-control.md` §5](../access-control.md). |
-| Block tree | `LoroTree` at path `content` | Each tree node is one block; structure ops (move, indent, outdent) are tree ops. |
-| Block `kind` and attrs | `LoroMap` on the tree node | `{ kind: "callout", icon: "💡", tone: "info" }`. |
-| Inline content | `LoroText` on the tree node | Only for text-bearing kinds. Marks live as Loro `mark/unmark` ops on this text. |
-| Block-level ACL tag | `subdoc: string` attr on the tree node | Read by the sync layer to route into the right subdoc. |
+Alternatives considered:
 
-This layout means structural operations (insert, delete, move, indent, outdent) are native `LoroTree` ops with their CRDT semantics defined by Loro — not editor-layer transforms that have to be reconciled across peers.
-
-### Block-level operations (core, not plugin-supplied)
-
-| Command | What it does | CRDT primitive |
-|---|---|---|
-| `block.insert(parentId, index, kind, attrs)` | Create a new block of `kind` under `parentId` at `index`. | `tree.create` + `map.set` |
-| `block.transform(blockId, newKind, attrs)` | Change a block's kind in place (e.g. paragraph → heading). Preserves children and inline content when compatible. | `map.set` on the node |
-| `block.move(blockId, newParentId, newIndex)` | Move within or across parents. | `tree.move` |
-| `block.indent(blockId)` / `block.outdent(blockId)` | Sugar over `tree.move` against siblings. | `tree.move` |
-| `block.delete(blockId)` | Tombstone the node; children follow. | `tree.delete` |
-| `block.split(blockId, offset)` | Split a text-bearing block at `offset` into two siblings of the same kind. | `text.delete` on tail of A + `tree.create` of B + `text.insert` |
-| `block.merge(prevId, nextId)` | Inverse of split; append `next`'s text into `prev`, delete `next`. | `text.insert` + `tree.delete` |
-
-These are the **only** structural commands plugins compose against. Plugins don't reach into `LoroTree` directly — they call these.
-
-### How plugins extend blocks
-
-A plugin registers one or more **block kinds** and/or **marks**. A block-kind registration declares:
-
-- The `kind` string (must be globally unique; namespaced for non-core plugins: `myorg.timeline-event`).
-- The Effect Schema for its typed attrs.
-- Whether children are allowed; if so, which kinds are allowed as children.
-- Whether inline content is allowed (and which marks are valid inside it).
-- A `concurrentSemantics` declaration per [ADR 0003](./0003-concurrent-semantics-no-global-rw-aw.md) — what to do when two peers concurrently edit the same block.
-- A render adapter (currently React; the renderer is an interface so a non-React adapter can ship later — see [`architecture.md` §3](../architecture.md#3-rendering-layer)).
-- Optional commands the plugin contributes (e.g. `code.toggleLineNumbers`).
-
-Plugins **cannot** register top-level surface modes — no plugin can ship a whiteboard or a Database view inside weaver v1. They extend the block kind catalog; they don't change the editor's modality.
-
-### Why blocks are the right unit for the AI agent
-
-The agent (see [`ai-agent.md`](../ai-agent.md)) operates on stable, addressable units. A block:
-
-- Has an ID the agent can reference across turns (`block:01H7…`) without worrying about cursor drift.
-- Has a typed `kind` the agent can reason about ("this is a heading; suggest sub-blocks").
-- Maps cleanly to the agent's tool surface: `rewrite-block(blockId, instruction)`, `transform-block(blockId, newKind)`, `generate-children(blockId, prompt)`.
-- Carries its own ACL tag, so the capability check at the tool boundary is one lookup against `block.subdoc`.
-
-Block-level concurrent semantics (ADR 0003) mean the agent and a human can edit the same block without coordinating — Loro merges, and `origin: agent-N` survives into the audit log.
-
-## Block kinds shipped in v1
-
-| Kind | Children allowed | Inline content | Notes |
-|---|---|---|---|
-| `paragraph` | No | Yes | Default block; markdown shortcut to other kinds. |
-| `heading` | No | Yes | Levels 1–3 (1–6 supported in schema; UI defaults to 3). |
-| `bullet-list-item` | Yes (recursive list items) | Yes | Nesting → indent depth in UI. |
-| `numbered-list-item` | Yes | Yes | Auto-renumber on reorder. |
-| `to-do` | Yes | Yes | `checked: boolean` attr. |
-| `toggle` | Yes | Yes | `collapsed: boolean` ephemeral state per-viewer. |
-| `quote` | Yes | Yes | Single-level only. |
-| `callout` | Yes | Yes | `icon: emoji`, `tone: info\|warn\|danger\|note`. |
-| `code` | No | Yes (plain) | `language: string`; tree-sitter highlighting. |
-| `image` | No | No | `src`, `alt`, `width`, `height`; OPFS cache + R2. |
-| `embed` | No | No | `url`, with allowlisted providers; iframe sandbox. |
-| `mention` | No | n/a (inline) | Inline kind; references a subject (user/agent). |
-| `divider` | No | No | Atomic. |
-| `table` | Yes (`table-row` → `table-cell`) | No (cells have inline) | Block-table (not a Database); fixed columns. |
-
-Plugins can register additional block kinds. They cannot remove these built-ins (would break content portability).
-
-## Marks shipped in v1
-
-| Mark | Constraints |
+| Alternative | Why not |
 |---|---|
-| `bold`, `italic`, `underline`, `strike` | Free overlap. |
-| `code` | Inline code; cannot overlap `link`. |
-| `link` | `href`; cannot overlap `code`; cannot nest. |
-| `highlight` | `color: enum`. |
-| `comment-anchor` | Internal; anchors a comment thread; not exposed to formatting UI. |
-| `agent-pending` | Internal; "uncommitted agent edit" visualization. |
-
-Plugins can register additional marks with constraint declarations enforced at op-validation time.
+| **Flat prose** (e.g. Delta) | No structural block addressable. Lists, code blocks, and callouts are either lost or smuggled in as embedded HTML. Per-block operations (drag handle, ACL tag, comments anchored to a block, AI tools targeting a block) have no natural anchor. |
+| **Schema-strict tree without an explicit "block" concept** | Tree nodes are mixed-grain — block-like nodes, inline nodes, and marks share the same type universe. Plugin and AI-tool authors must reason about node grain on every operation. Block-level affordances become editor-wide concerns to retrofit. |
+| **Notion-style blocks** (this decision) | Each block is a uniform first-class addressable thing. See bullets above. |
 
 ## Scope boundary (what's not in v1)
 
@@ -122,16 +46,17 @@ For both, the v1 answer is the `embed` block — an iframe sandbox pointing at a
 
 ### Immediate
 
-- `architecture.md` §2 (document model) specifies the Notion-style block layout.
+- `architecture.md` §2 (document model) specifies the Notion-style block layout at a high level.
+- `block-model.md` is the implementation spec: anatomy, container mapping, command surface, plugin extension, reactivity, Valtio role.
 - `architecture.md` §5 (plugin architecture): plugins register block kinds and marks against a typed schema.
 - `comparison.md`: positioning is "Notion-style block editor, scoped to docs only."
 
 ### Downstream
 
 - Every plugin authored as a block-kind plugin or a mark plugin (or both).
-- Block-level commands (`block.insert`, `block.transform`, `block.move`, `block.indent`, `block.outdent`, `block.delete`, `block.split`, `block.merge`) are core, not plugin-supplied.
+- Block-level commands are core, not plugin-supplied; full list in [`block-model.md` §3](../block-model.md).
 - Slash command and drag handle are core UI affordances in `@weaver/react`.
-- AI tools have a natural unit ("rewrite block", "summarize block", "transform-kind block to callout"); the agent tool registry exposes block as a first-class addressable resource.
+- AI tools have a natural unit; the agent tool registry exposes block as a first-class addressable resource.
 - Block-level ACL tags tie directly to `LoroTreeNode` attrs — no extra modeling needed.
 
 ### Reversibility
@@ -145,6 +70,7 @@ For both, the v1 answer is the `embed` block — an iframe sandbox pointing at a
 
 ## References
 
+- [`block-model.md`](../block-model.md) — implementation spec for the data structure, reactivity, and UI state.
 - [Notion's block model](https://www.notion.so/help/what-are-blocks)
 - ADR 0001 — Loro adoption — [`./0001-adopt-loro-over-yjs.md`](./0001-adopt-loro-over-yjs.md)
 - ADR 0003 — Concurrent semantics — [`./0003-concurrent-semantics-no-global-rw-aw.md`](./0003-concurrent-semantics-no-global-rw-aw.md)
