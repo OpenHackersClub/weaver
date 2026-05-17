@@ -188,7 +188,28 @@ export const handleInsertLineBreak = (
   return { caret: { blockId: caret.blockId, offset: caret.offset + 1 } };
 };
 
+const LIST_KINDS: ReadonlySet<BlockKind> = new Set<BlockKind>([
+  "bullet-list-item",
+  "numbered-list-item",
+  "to-do",
+]);
+
 export const handleEnter = (editor: Editor, caret: DomCaret): ApplyResult => {
+  // Enter on an *empty* list item exits the list — the item becomes a plain
+  // paragraph rather than spawning another empty list item.
+  const block = getBlock(editor, caret.blockId);
+  if (
+    block &&
+    LIST_KINDS.has(block.kind) &&
+    editor.commands.text.length(caret.blockId) === 0
+  ) {
+    editor.commands.block.transform({
+      blockId: caret.blockId,
+      newKind: "paragraph",
+      attrs: {},
+    });
+    return { caret: { blockId: caret.blockId, offset: 0 } };
+  }
   const newId = editor.commands.block.split({
     blockId: caret.blockId,
     offset: caret.offset,
@@ -244,18 +265,120 @@ export const handleDeleteForward = (
   return { caret };
 };
 
+interface MarkSegment {
+  readonly blockId: BlockId;
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * Resolve a (possibly cross-block) DOM range into the per-block character
+ * segments a mark should cover. A single-block range keeps the existing
+ * collapsed-selection-means-whole-block behaviour.
+ */
+const computeMarkSegments = (
+  editor: Editor,
+  range: DomRange,
+): MarkSegment[] => {
+  if (range.anchor.blockId === range.focus.blockId) {
+    const single = computeMarkRangeWithinBlock(editor, range);
+    return single ? [single] : [];
+  }
+  const order = getChildren(editor, rootId(editor));
+  const ai = order.indexOf(range.anchor.blockId);
+  const fi = order.indexOf(range.focus.blockId);
+  if (ai < 0 || fi < 0) return [];
+  const [start, end] =
+    ai <= fi ? [range.anchor, range.focus] : [range.focus, range.anchor];
+  const ids = order.slice(Math.min(ai, fi), Math.max(ai, fi) + 1);
+  const segments: MarkSegment[] = [];
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i]!;
+    const segStart = i === 0 ? start.offset : 0;
+    const segEnd =
+      i === ids.length - 1 ? end.offset : editor.commands.text.length(id);
+    if (segEnd > segStart) {
+      segments.push({ blockId: id, start: segStart, end: segEnd });
+    }
+  }
+  return segments;
+};
+
+/** Whether `mark` already covers every character of `segment`. */
+const isSegmentFullyMarked = (
+  editor: Editor,
+  segment: MarkSegment,
+  mark: string,
+): boolean => {
+  const delta = editor.commands.text.toDelta(segment.blockId) as Array<{
+    insert?: string;
+    attributes?: Record<string, unknown>;
+  }>;
+  let coverage = 0;
+  let cursor = 0;
+  for (const part of delta) {
+    if (typeof part.insert !== "string") continue;
+    const partStart = cursor;
+    const partEnd = cursor + part.insert.length;
+    const overlapStart = Math.max(partStart, segment.start);
+    const overlapEnd = Math.min(partEnd, segment.end);
+    if (
+      overlapEnd > overlapStart &&
+      part.attributes &&
+      part.attributes[mark] !== undefined
+    ) {
+      coverage += overlapEnd - overlapStart;
+    }
+    cursor = partEnd;
+  }
+  return segment.end > segment.start && coverage >= segment.end - segment.start;
+};
+
 export const handleToggleMark = (
   editor: Editor,
   range: DomRange,
   mark: "bold" | "italic" | "underline" | "strike",
 ): ApplyResult | null => {
-  const r = computeMarkRangeWithinBlock(editor, range);
-  if (!r) return null;
-  editor.commands.text.toggleMark({
-    blockId: r.blockId,
-    range: { start: r.start, end: r.end },
-    mark,
-  });
+  const segments = computeMarkSegments(editor, range);
+  if (segments.length === 0) return null;
+  if (segments.length === 1) {
+    const r = segments[0]!;
+    editor.commands.text.toggleMark({
+      blockId: r.blockId,
+      range: { start: r.start, end: r.end },
+      mark,
+    });
+    return { caret: range.focus };
+  }
+  // Cross-block: decide globally, then flip only the segments that need it
+  // (`toggleMark` is per-segment, so flipping an already-correct one is wrong).
+  const allOn = segments.every((s) => isSegmentFullyMarked(editor, s, mark));
+  for (const s of segments) {
+    const on = isSegmentFullyMarked(editor, s, mark);
+    if (allOn ? on : !on) {
+      editor.commands.text.toggleMark({
+        blockId: s.blockId,
+        range: { start: s.start, end: s.end },
+        mark,
+      });
+    }
+  }
+  return { caret: range.focus };
+};
+
+/** Strip every inline mark from the (possibly cross-block) selection. */
+export const handleClearFormatting = (
+  editor: Editor,
+  range: DomRange,
+): ApplyResult | null => {
+  const segments = computeMarkSegments(editor, range);
+  if (segments.length === 0) return null;
+  for (const s of segments) {
+    editor.commands.text.clearMarks({
+      blockId: s.blockId,
+      range: { start: s.start, end: s.end },
+    });
+  }
   return { caret: range.focus };
 };
 

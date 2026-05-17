@@ -8,6 +8,7 @@ import {
 } from "./selection-mapper.js";
 import {
   handleBackspace,
+  handleClearFormatting,
   handleDeleteForward,
   handleEnter,
   handleInsertLineBreak,
@@ -302,6 +303,18 @@ export const attachEditor = (
           focus: { blockId: lastId, offset: lastLen },
           collapsed: false,
         });
+      }
+      return;
+    }
+
+    // Ctrl/Cmd+\ — strip all inline formatting from the selection.
+    if (lower === "\\") {
+      ev.preventDefault();
+      const range = readDomSelection(host);
+      if (range) {
+        handleClearFormatting(editor, range);
+        pendingCaret = range;
+        flushRerender();
       }
       return;
     }

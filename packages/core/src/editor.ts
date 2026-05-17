@@ -38,6 +38,9 @@ const DEFAULT_TEXT_STYLES = {
   highlight: { expand: "after" as const },
 };
 
+/** Every mark key the editor knows about — used to clear all formatting. */
+const MARK_KEYS = Object.keys(DEFAULT_TEXT_STYLES);
+
 export type MarkKind =
   | "bold"
   | "italic"
@@ -123,6 +126,10 @@ export interface EditorCommands {
       range: { start: number; end: number };
       mark: MarkKind;
       value?: unknown;
+    }): void;
+    clearMarks(args: {
+      blockId: BlockId;
+      range: { start: number; end: number };
     }): void;
     readonly mark: {
       update(args: {
@@ -608,6 +615,15 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
             text.unmark(range, "code");
           }
           text.mark(range, mark, value ?? true);
+        }),
+
+      clearMarks: ({ blockId, range }) =>
+        withOrigin(() => {
+          const node = getNode(tree, blockId);
+          if (!node) return;
+          if (range.end <= range.start) return;
+          const text = ensureText(node);
+          for (const key of MARK_KEYS) text.unmark(range, key);
         }),
 
       mark: {
