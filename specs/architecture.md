@@ -110,7 +110,7 @@ Map document structure to Loro container types. Every block is a typed `LoroTree
 | Selection state (canonical) | `LoroMap` ("selection") holding `Cursor` anchors per peer |
 | Per-block ACL tag | `LoroMap` attr on the tree node (`acl-tag: "public" \| "internal" \| "confidential"`) |
 
-The block-kind list shipped in v1 is in [ADR 0002 §"Block kinds shipped in v1"](adr/0002-notion-style-block-model.md).
+The block-kind list shipped in v1 is in [`block-model.md` §3](block-model.md).
 
 ### Costs we accept
 
@@ -155,6 +155,8 @@ Reads validate at the boundary; writes only commit via typed mutators, framed by
 | Presence / awareness | Loro `EphemeralStore` | Ephemeral subscribe |
 
 **Hard rule:** Valtio never holds document data. If it's persisted or synced, it's in LoroDoc.
+
+For the full treatment of how blocks live across these layers — Loro container shape, typed `Block<K>` selectors, React hook API, Valtio scope shape, and the worked examples that separate document state from per-viewer UI state — see [`block-model.md`](block-model.md).
 
 ### Render pipeline
 
@@ -216,7 +218,7 @@ type Plugin = {
 
 `Layer.merge` to compose. Each plugin's Layer requires editor services (`EditorCore`, `LoroDoc`, `CommandBus`, `AgentRegistry`) and provides its own registrations.
 
-**Built-in block kinds + marks are *not* plugins** — they live in `@weaver/core` (see [ADR 0002 §"Block kinds shipped in v1"](adr/0002-notion-style-block-model.md)). Plugins **extend** the set with additional kinds (e.g. `math-equation`, `mermaid-diagram`, `kanban-card`) but cannot remove built-ins (would break content portability).
+**Built-in block kinds + marks are *not* plugins** — they live in `@weaver/core` (see [`block-model.md` §3](block-model.md)). Plugins **extend** the set with additional kinds (e.g. `math-equation`, `mermaid-diagram`, `kanban-card`) but cannot remove built-ins (would break content portability).
 
 ### Costs
 

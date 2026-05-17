@@ -35,6 +35,8 @@ export default defineConfig({
     },
   },
   vite: {
+    server: { allowedHosts: [".ts.net"] },
+    preview: { allowedHosts: [".ts.net"] },
     ssr: {
       noExternal: ["mermaid"],
     },
