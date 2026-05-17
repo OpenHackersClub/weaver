@@ -1,6 +1,6 @@
 # Block Model — Data Structure, Reactivity, and UI State
 
-> Companion to [`architecture.md` §2 and §3](architecture.md). Where the decision to use a Notion-style block model lives in [ADR 0002](adr/0002-notion-style-block-model.md), this doc fills in the implementation: how a block is stored, how it's mutated, how it reaches the screen, and what role Valtio plays alongside LoroDoc.
+> Companion to [`architecture.md` §2 and §3](architecture.md). Where the decision to use a Notion-style block model lives in [ADR 0002](adr/0002-notion-style-block-model.md), this doc fills in the implementation: how a block is stored, how it's mutated, how it reaches the screen, and how ephemeral UI state lives in Effect-TS `SubscriptionRef` stores alongside LoroDoc ([ADR 0007](adr/0007-ui-state-effect-over-valtio.md)).
 
 ## 1. The three layers
 
@@ -19,15 +19,15 @@ flowchart LR
     Selectors["Selectors / queries"]
   end
 
-  subgraph U[UI — React + Valtio]
+  subgraph U[UI — React + Effect SubscriptionRef]
     Hook["useBlock(id) hook"]
     React["React render"]
-    Valtio["Valtio proxy<br/>ephemeral UI state"]
+    Store["Effect SubscriptionRef<br/>ephemeral UI state"]
   end
 
   L -- "subscribe → diff" --> C
   C -- "typed snapshot" --> U
-  Valtio -- "subscribe (proxy)" --> U
+  Store -- "Stream.changes" --> U
   U -- "block.command(...)" --> L
 ```
 
@@ -35,9 +35,9 @@ flowchart LR
 |---|---|---|---|
 | **LoroDoc** | Document truth | `doc.subscribe()` diff events | Block tree structure, block `kind` and typed attrs, inline text + marks, per-block ACL tag, references between blocks. |
 | **Editor core** | Typed view over LoroDoc | Pure derivation (no own state) | `Block<K>` selectors that decode `LoroTreeNode` + `LoroMap` into validated typed records. Stateless. |
-| **UI (React + Valtio)** | Rendering + ephemeral interaction | React hooks for document state; Valtio proxies for ephemeral UI state | Toggle open/closed, hover/focus, drag preview, slash-menu state, toolbar open, AI panel state, in-flight selection rectangle. **Nothing that survives reload.** |
+| **UI (React + Effect)** | Rendering + ephemeral interaction | React hooks for document state; Effect-TS `SubscriptionRef` cells for ephemeral UI state | Toggle open/closed, hover/focus, drag preview, slash-menu state, toolbar open, AI panel state, in-flight selection rectangle. **Nothing that survives reload.** |
 
-The hard rule: **anything that could be persisted, synced, or audited belongs in LoroDoc. Everything else — and only everything else — can live in Valtio.**
+The hard rule: **anything that could be persisted, synced, or audited belongs in LoroDoc. Everything else — and only everything else — can live in a `SubscriptionRef`** ([ADR 0007](adr/0007-ui-state-effect-over-valtio.md)).
 
 ## 2. The block, in detail
 
@@ -115,7 +115,7 @@ Every command runs inside a single Loro transaction with `origin` set to the cal
 | `bullet-list-item` | Yes (recursive list items) | Yes | Nesting → indent depth in UI. |
 | `numbered-list-item` | Yes | Yes | Auto-renumber on reorder. |
 | `to-do` | Yes | Yes | `checked: boolean` attr. |
-| `toggle` | Yes | Yes | `collapsed: boolean` attr (document-shared collapsed; per-viewer override lives in Valtio — see §6). |
+| `toggle` | Yes | Yes | `collapsed: boolean` attr (document-shared collapsed; per-viewer override lives in `BlockUiStore` — see §6). |
 | `quote` | Yes | Yes | Single-level only. |
 | `callout` | Yes | Yes | `icon: emoji`, `tone: info\|warn\|danger\|note`. |
 | `code` | No | Yes (plain) | `language: string`; tree-sitter highlighting. |
@@ -166,7 +166,7 @@ sequenceDiagram
   participant Core as Editor core (selectors)
   participant H as useBlock(id) / useChildren(id)
   participant R as React component
-  participant V as Valtio (ephemeral UI)
+  participant V as Effect SubscriptionRef (ephemeral UI)
 
   U->>Cmd: invoke (e.g. block.split)
   Cmd->>L: apply ops + commit(origin)
@@ -174,8 +174,8 @@ sequenceDiagram
   Core->>Core: invalidate affected block IDs
   Core-->>H: notify subscribers
   H-->>R: re-render (only affected blocks)
-  Note over V,R: Valtio proxies (per-block scoped) re-render the same block<br/>without touching LoroDoc when the user toggles UI state
-  V-->>R: proxy snapshot updates
+  Note over V,R: SubscriptionRef cells (per-block scoped) re-render the same block<br/>without touching LoroDoc when the user toggles UI state
+  V-->>R: SubscriptionRef changes stream
 ```
 
 Loro diff events fire **once per commit**, not per individual op. The editor core walks the diff, computes the set of affected block IDs, and notifies only the React hooks subscribed to those IDs. Unaffected blocks don't re-render.
@@ -194,83 +194,183 @@ Each hook subscribes to **exactly the slice of LoroDoc it depends on**. A React 
 
 ### The render adapter
 
-The editor surface (contenteditable area) is **not React-managed** — it's imperatively patched by `@weaver/dom` from Loro diff events ([`architecture.md` §1](architecture.md#1-system-overview)). React is used only for **chrome** around the editor: block-handle UI, toolbar, slash menu, comments panel, AI panel. Those parts subscribe to LoroDoc the normal way (via hooks above) and to Valtio for their own ephemeral state (§6).
+The editor surface (contenteditable area) is **not React-managed** — it's imperatively patched by `@weaver/dom` from Loro diff events ([`architecture.md` §1](architecture.md#1-system-overview)). React is used only for **chrome** around the editor: block-handle UI, toolbar, slash menu, comments panel, AI panel. Those parts subscribe to LoroDoc the normal way (via hooks above) and to Effect-TS `SubscriptionRef` stores for their own ephemeral state (§6).
 
-## 6. Valtio — what it does, what it does not do
+## 6. Ephemeral UI state — Effect-TS `SubscriptionRef`
 
-Valtio holds **ephemeral UI state** — state that is reset on reload and never travels over the network. It is the only place such state lives.
+Per [ADR 0007](adr/0007-ui-state-effect-over-valtio.md), all ephemeral UI state lives in Effect-TS — `SubscriptionRef<T>` for observable cells, `PubSub<E>` for event broadcasts, `Layer` for store composition and injection, `Match.tag` (with `Schema.TaggedStruct` / `Schema.Union`) for state machines. It is the only place such state lives.
 
-### Allowed in Valtio
+"Ephemeral UI state" means state that is reset on reload, never travels over the network, and is purely a function of how this one viewer is currently interacting with the UI.
+
+### Allowed in `SubscriptionRef` stores
 
 | State | Scope | Example |
 |---|---|---|
 | Toggle open/closed | Per-block, per-viewer | A `toggle` block's expanded/collapsed state in the local UI. (`collapsed` in the block's typed attrs is **document-shared collapsed**, which is a different attribute — see "Two collapse states" below.) |
 | Hover / focus ring | Per-block, per-viewer | Highlighting the block under the cursor for the drag handle. |
 | Drag preview | Editor-wide, ephemeral | The floating block preview while a drag is in flight. |
-| Slash-menu state | Editor-wide | Open/closed, current filter string, highlighted item. |
+| Slash-menu state | Editor-wide | A `Closed \| Open { anchor, filter, highlight }` tagged union. |
 | Floating toolbar state | Editor-wide | Position, currently-applicable marks, open submenus. |
 | AI panel state | Editor-wide | Open/closed, conversation scroll position, draft input. |
 | In-flight selection rectangle | Editor-wide | Marquee-select preview before commit to `Cursor`. |
 | Per-block UI flags | Per-block | "Comments thread is expanded for this block in this tab." |
 
-### Forbidden in Valtio
+### Forbidden in `SubscriptionRef` stores
 
-| State | Why it can't live in Valtio |
+| State | Where it really belongs |
 |---|---|
-| Block content (inline text, marks) | Document data — must sync, audit, undo, branch. → LoroDoc. |
-| Block kind, attrs, children | Document data. → LoroDoc. |
-| Per-block ACL tag (`subdoc`) | Document data; load-bearing for access control. → LoroDoc. |
-| Comment threads, comment bodies | Document data. → LoroDoc. |
-| Selection canonical state (cursor anchors that should survive reload or follow a presence broadcast) | → `Cursor` anchors in a `LoroMap`, *not* Valtio. |
-| Presence (where another peer's cursor is) | → Loro `EphemeralStore`, *not* Valtio. |
-| Server-derived authorization state (what the user can edit) | → comes from the capability token; not a UI concern past initial bootstrap. |
+| Block content (inline text, marks) | LoroDoc — document data; must sync, audit, undo, branch. |
+| Block kind, attrs, children | LoroDoc — document data. |
+| Per-block ACL tag (`subdoc`) | LoroDoc — load-bearing for access control. |
+| Comment threads, comment bodies | LoroDoc — document data. |
+| Selection canonical state (cursor anchors that should survive reload or follow a presence broadcast) | `Cursor` anchors in a `LoroMap`. |
+| Presence (where another peer's cursor is) | Loro `EphemeralStore`. |
+| Server-derived authorization state (what the user can edit) | The capability token; not a UI concern past initial bootstrap. |
 
-### The shape of a Valtio proxy
+The hard rule: **anything that could be persisted, synced, or audited belongs in LoroDoc. Everything else — and only everything else — can live in a `SubscriptionRef`.**
 
-Valtio state is organized in **scopes**: a small set of editor-wide proxies, plus a per-block proxy lazily allocated on first use.
+### The shape of an Effect-TS store
+
+UI state is organized as **services** — a small set of editor-wide `SubscriptionRef`s on an `EditorUiStore`, plus per-block cells lazily allocated on a `BlockUiStore`.
 
 ```ts
-// @weaver/react/state/editor.ts
-import { proxy } from "valtio";
+// @weaver/react/state/editor-ui.ts
+import { Effect, Layer, SubscriptionRef, Ref, Schema, Match } from "effect";
 
-export const editorUiState = proxy({
-  slashMenu: { open: false, filter: "", anchor: null as BlockId | null },
-  toolbar:   { open: false, anchor: null as BlockId | null },
-  drag:      { active: false, blockId: null as BlockId | null, ghost: null as DOMRect | null },
-  aiPanel:   { open: false, draft: "" },
-});
+export const SlashMenu = Schema.Union(
+  Schema.TaggedStruct("Closed", {}),
+  Schema.TaggedStruct("Open", {
+    anchor: BlockIdSchema,
+    filter: Schema.String,
+    highlight: Schema.Number,
+  }),
+);
+export type SlashMenu = Schema.Schema.Type<typeof SlashMenu>;
 
-// per-block proxies are keyed by BlockId, lazily created
-const blockUiByID = new Map<BlockId, ReturnType<typeof makeBlockUi>>();
+export class EditorUiStore extends Effect.Service<EditorUiStore>()(
+  "EditorUiStore",
+  {
+    effect: Effect.gen(function* () {
+      const slashMenu = yield* SubscriptionRef.make<SlashMenu>({ _tag: "Closed" });
+      const toolbar   = yield* SubscriptionRef.make<ToolbarState>(initialToolbar);
+      const aiPanel   = yield* SubscriptionRef.make<AiPanelState>(initialAi);
+      const drag      = yield* SubscriptionRef.make<DragState>({ _tag: "Idle" });
+      return { slashMenu, toolbar, aiPanel, drag };
+    }),
+  },
+) {}
 
-const makeBlockUi = () =>
-  proxy({
-    hovered: false,
-    handleVisible: false,
-    threadExpanded: false,
-    locallyCollapsed: false,   // toggle/list local-collapse override
-  });
-
-export const blockUi = (id: BlockId) => {
-  let s = blockUiByID.get(id);
-  if (!s) { s = makeBlockUi(); blockUiByID.set(id, s); }
-  return s;
+// Per-block ephemera, lazily allocated.
+export interface BlockUi {
+  readonly hovered: boolean;
+  readonly handleVisible: boolean;
+  readonly threadExpanded: boolean;
+  readonly locallyCollapsed: boolean | null;  // toggle/list local-collapse override
+}
+const initialBlockUi: BlockUi = {
+  hovered: false, handleVisible: false, threadExpanded: false, locallyCollapsed: null,
 };
+
+export class BlockUiStore extends Effect.Service<BlockUiStore>()(
+  "BlockUiStore",
+  {
+    effect: Effect.gen(function* () {
+      const cells = new Map<BlockId, SubscriptionRef.SubscriptionRef<BlockUi>>();
+      const cellFor = (id: BlockId) =>
+        Effect.sync(() => {
+          let c = cells.get(id);
+          if (!c) {
+            c = Effect.runSync(SubscriptionRef.make<BlockUi>(initialBlockUi));
+            cells.set(id, c);
+          }
+          return c;
+        });
+      const dispose = (id: BlockId) =>
+        Effect.sync(() => { cells.delete(id); });
+      return { cellFor, dispose };
+    }),
+  },
+) {}
 ```
 
-A React component reads both LoroDoc (via hooks) and Valtio (via `useSnapshot`):
+State transitions are exhaustive tagged-union pattern matches, not field assignments:
+
+```ts
+const openSlashMenu = (anchor: BlockId) =>
+  Effect.gen(function* () {
+    const { slashMenu } = yield* EditorUiStore;
+    yield* Ref.set(slashMenu, { _tag: "Open", anchor, filter: "", highlight: 0 });
+  });
+
+const handleSlashKey = (ev: KeyboardEvent) =>
+  Effect.gen(function* () {
+    const { slashMenu } = yield* EditorUiStore;
+    const current = yield* Ref.get(slashMenu);
+    yield* Match.value(current).pipe(
+      Match.tag("Closed", () => Effect.unit),
+      Match.tag("Open", () =>
+        Match.value(ev.key).pipe(
+          Match.when("Escape", () =>
+            Ref.set(slashMenu, { _tag: "Closed" }),
+          ),
+          Match.when("ArrowDown", () =>
+            Ref.update(slashMenu, (s) =>
+              s._tag === "Open" ? { ...s, highlight: s.highlight + 1 } : s,
+            ),
+          ),
+          Match.orElse(() => Effect.unit),
+        ),
+      ),
+      Match.exhaustive,
+    );
+  });
+```
+
+### React adapter
+
+One hook bridges Effect's `Stream` to React's `useSyncExternalStore`:
+
+```ts
+// @weaver/react/use-subscription-ref.ts
+import { useCallback, useSyncExternalStore } from "react";
+import { Effect, Fiber, Ref, Stream, SubscriptionRef } from "effect";
+
+export function useSubscriptionRef<T, S>(
+  ref: SubscriptionRef.SubscriptionRef<T>,
+  select: (t: T) => S,
+  eq: (a: S, b: S) => boolean = Object.is,
+): S {
+  return useSyncExternalStore(
+    useCallback((onChange) => {
+      const fiber = Effect.runFork(
+        ref.changes.pipe(
+          Stream.map(select),
+          Stream.changesWith(eq),
+          Stream.runForEach(() => Effect.sync(onChange)),
+        ),
+      );
+      return () => { Effect.runFork(Fiber.interrupt(fiber)); };
+    }, [ref, select, eq]),
+    () => select(Effect.runSync(Ref.get(ref))),
+  );
+}
+```
+
+A React component reads both LoroDoc (via the block hooks) and the UI store (via `useSubscriptionRef`):
 
 ```tsx
 const BlockChrome: React.FC<{ id: BlockId }> = ({ id }) => {
-  const block = useBlock(id);                   // LoroDoc-derived
-  const ui    = useSnapshot(blockUi(id));       // Valtio
+  const block = useBlock(id);                            // LoroDoc-derived
+  const ui    = useBlockUi(id);                          // SubscriptionRef-derived
   if (!block) return null;
+  const onEnter = () => updateBlockUi(id, (s) => ({ ...s, hovered: true }));
+  const onLeave = () => updateBlockUi(id, (s) => ({ ...s, hovered: false }));
   return (
     <div
       data-block-id={id}
       data-kind={block.kind}
-      onMouseEnter={() => { blockUi(id).hovered = true; }}
-      onMouseLeave={() => { blockUi(id).hovered = false; }}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
     >
       {ui.handleVisible && <BlockHandle id={id} />}
       <BlockBody block={block} />
@@ -279,7 +379,9 @@ const BlockChrome: React.FC<{ id: BlockId }> = ({ id }) => {
 };
 ```
 
-When the user types into the block, the contenteditable surface goes to LoroDoc directly via `@weaver/dom` — it doesn't go through Valtio.
+`useBlockUi(id)` and `updateBlockUi(id, fn)` are thin helpers over `BlockUiStore.cellFor(id)`. The store is provided via a `Layer` at the React root so tests and Storybook stories can swap implementations.
+
+When the user types into the block, the contenteditable surface goes to LoroDoc directly via `@weaver/dom` — it never goes through the UI store.
 
 ### Two collapse states (worked example of the layering rule)
 
@@ -288,7 +390,7 @@ A `toggle` block can be collapsed in two distinct senses, and they go in two dif
 | Sense | Layer | Why |
 |---|---|---|
 | **"This document has the toggle collapsed for everyone, as part of its content."** | LoroDoc (`collapsed: boolean` typed attr) | A document author intentionally publishes a collapsed toggle; this should sync, be auditable, and survive reload. It's part of the doc. |
-| **"I, the current viewer, have temporarily expanded this toggle in my tab."** | Valtio (`blockUi(id).locallyCollapsed`) | A per-viewer override of the document state. Does not sync. Does not persist. Resets on reload. |
+| **"I, the current viewer, have temporarily expanded this toggle in my tab."** | `BlockUiStore.cellFor(id).locallyCollapsed` | A per-viewer override of the document state. Does not sync. Does not persist. Resets on reload. |
 
 The component reads the LoroDoc value and overlays the local override:
 
@@ -296,7 +398,7 @@ The component reads the LoroDoc value and overlays the local override:
 const visuallyCollapsed = ui.locallyCollapsed ?? block.attrs.collapsed;
 ```
 
-This is the **shape every "two collapse states" question takes**: if it should sync, it's LoroDoc; if it's "my local view of the doc," it's Valtio.
+This is the **shape every "two collapse states" question takes**: if it should sync, it's LoroDoc; if it's "my local view of the doc," it's the UI store.
 
 ## 7. Why blocks are the right unit for the AI agent
 
@@ -309,16 +411,18 @@ The agent (see [`ai-agent.md`](ai-agent.md)) operates on stable, addressable uni
 
 Block-level concurrent semantics ([ADR 0003](adr/0003-concurrent-semantics-no-global-rw-aw.md)) mean the agent and a human can edit the same block without coordinating — Loro merges, and `origin: agent-N` survives into the audit log.
 
-The agent peer does **not** touch Valtio. Valtio is a UI-only concern; the agent's view of the doc is the LoroDoc state machine.
+The agent peer does **not** touch the UI store. The UI store is a viewer-only concern; the agent's view of the doc is the LoroDoc state machine.
 
 ## 8. Anti-patterns to reject
 
-- **Mirroring LoroDoc into Valtio.** "Let me keep a Valtio proxy in sync with the block tree for easier React access" — no. Use the typed selectors and hooks. The hooks are already narrow.
-- **Putting comment bodies / inline text in Valtio.** Comment bodies are document data; they belong in LoroDoc. Local draft text in the comment composer (not yet submitted) can live in Valtio.
+- **Mirroring LoroDoc into a `SubscriptionRef`.** "Let me keep an Effect store in sync with the block tree for easier React access" — no. Use the typed selectors and hooks; LoroDoc already supports narrow subscriptions. See [ADR 0007 §"What this changes"](adr/0007-ui-state-effect-over-valtio.md) for the full argument.
+- **Putting comment bodies / inline text in the UI store.** Comment bodies are document data; they belong in LoroDoc. *Local draft text* in the comment composer (not yet submitted) can live in the UI store.
 - **Holding a mutable `Block` value and editing it.** `Block<K>` is a read-only snapshot. Mutations go through `block.command(...)`.
-- **Using `useState` for editor state.** Component-local `useState` is fine for purely local UI concerns (e.g. "is this menu open right now") — but it should not contain document data, nor cross-component state. If two components need to read it, hoist it to a Valtio proxy, not a context.
-- **Subscribing to all of LoroDoc.** Don't `useSnapshot(loroDocProxy)`. Use the narrow `useBlock(id)` / `useChildren(id)` hooks.
+- **Using `useState` for cross-component editor state.** Component-local `useState` is fine for genuinely local UI concerns. If two components need to read or write it, hoist it to a `SubscriptionRef` on `EditorUiStore`, not React Context.
+- **Subscribing to all of LoroDoc.** Use the narrow `useBlock(id)` / `useChildren(id)` hooks.
 - **Hand-rolling Loro container access in components.** Components consume `Block<K>` and `LoroText` references through the hook API; they don't call `doc.getTree("content")` directly.
+- **Untagged UI state.** A new menu/panel/modal starts as a `Schema.Union` tagged state, not as accreting boolean flags on a record. Future contributors should be able to add a case and have `Match.exhaustive` flag every site that hasn't handled it.
+- **Reaching for Valtio / Zustand / Jotai.** None of those are in the stack — see [ADR 0007](adr/0007-ui-state-effect-over-valtio.md). If you need cross-component ephemeral state, use Effect.
 
 ## See also
 
@@ -326,5 +430,6 @@ The agent peer does **not** touch Valtio. Valtio is a UI-only concern; the agent
 - [`architecture.md` §3 (reactivity & state)](architecture.md#3-reactivity--state) — the layering table.
 - [ADR 0002 — Notion-style block model](adr/0002-notion-style-block-model.md) — the decision and scope rationale.
 - [ADR 0003 — Concurrent semantics](adr/0003-concurrent-semantics-no-global-rw-aw.md) — per-block merge rules.
+- [ADR 0007 — UI state store: Effect-TS over Valtio](adr/0007-ui-state-effect-over-valtio.md) — why ephemeral UI state lives in `SubscriptionRef`.
 - [`ai-agent.md`](ai-agent.md) — how the agent peer reads and writes blocks.
 - [`access-control.md` §5](access-control.md) — how the per-block `subdoc` tag drives tier routing.

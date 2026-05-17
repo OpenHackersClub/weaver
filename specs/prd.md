@@ -198,7 +198,7 @@ One-line summaries. Full rationale in linked ADRs and architecture docs.
 | D1 | LoroDoc is the single source of truth; no parallel editor state | [DECIDED] | [`architecture.md` §2](architecture.md#2-document-model--lorodoc-as-single-source-of-truth) |
 | D2 | History via Loro peer-scoped `UndoManager` + origin tags | [DECIDED] | [`architecture.md` §2](architecture.md#2-document-model--lorodoc-as-single-source-of-truth) |
 | D3 | Effect-TS at the boundaries, not the hot path | [DECIDED] | [`architecture.md` §4](architecture.md#4-effect-ts--where-it-shines-where-it-doesnt) |
-| D4 | Valtio holds UI-only state, never document state | [DECIDED] | [`block-model.md` §6](block-model.md), [`architecture.md` §3](architecture.md#3-reactivity--state) |
+| D4 | Ephemeral UI state lives in Effect-TS `SubscriptionRef` stores (Layer-injected); never document state | [DECIDED] | [ADR 0007](adr/0007-ui-state-effect-over-valtio.md), [`block-model.md` §6](block-model.md), [`architecture.md` §3](architecture.md#3-reactivity--state) |
 | D5 | React renders chrome; editing surface is imperative DOM | [DECIDED] | [`architecture.md` §1](architecture.md#1-system-overview) |
 | D6 | Loro (Rust-native CRDT, WASM build) as the CRDT core | [DECIDED] | [ADR 0001](adr/0001-adopt-loro-over-yjs.md) |
 | D7 | Subdoc partitioning for read access control | [DECIDED] | [`access-control.md` §5](access-control.md) |
