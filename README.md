@@ -2,7 +2,10 @@
 
 A TypeScript rich-text editor with **LoroDoc as the single source of truth**, designed for AI agents as a first-class collaborative peer.
 
-> Status: pre-implementation. Start with [`specs/prd.md`](./specs/prd.md) for the product brief, then drill into [`specs/architecture.md`](./specs/architecture.md), [`specs/access-control.md`](./specs/access-control.md), [`specs/hard-problems.md`](./specs/hard-problems.md), [`specs/wasm-strategy.md`](./specs/wasm-strategy.md), [`specs/ai-agent.md`](./specs/ai-agent.md). [`specs/adr/`](./specs/adr/) holds individual decision records; [`specs/comparison.md`](./specs/comparison.md) compares weaver with other editors.
+**Docs site** — <https://weaver-docs.pages.dev> (default CF Pages subdomain; `weaver.openhackers.club` once DNS is in place).
+**Playground** — to come; spec at [`specs/playground.md`](./specs/playground.md).
+
+> Status: pre-implementation. Start with [`specs/prd.md`](./specs/prd.md) for the product brief, then drill into [`specs/architecture.md`](./specs/architecture.md), [`specs/access-control.md`](./specs/access-control.md), [`specs/hard-problems.md`](./specs/hard-problems.md), [`specs/wasm-strategy.md`](./specs/wasm-strategy.md), [`specs/ai-agent.md`](./specs/ai-agent.md). [`specs/adr/`](./specs/adr/) holds individual decision records; [`specs/comparison.md`](./specs/comparison.md) compares weaver with other editors. [`specs/lexical-parity.md`](./specs/lexical-parity.md) catalogs the Lexical feature subset we commit to; [`specs/benchmarks.md`](./specs/benchmarks.md) defines the perf bar.
 
 ## Design pillars
 
