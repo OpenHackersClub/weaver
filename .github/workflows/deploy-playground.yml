@@ -49,6 +49,17 @@ jobs:
       - name: Build playground SPA
         run: pnpm --filter @weaver/playground build
 
+      # Idempotent project creation — first deploy needs to provision the
+      # `weaver-playground` Pages project; subsequent runs find it and exit 1
+      # (which we swallow). Once the project exists this step is a no-op.
+      - name: Ensure Cloudflare Pages project exists
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create weaver-playground --production-branch main
+        continue-on-error: true
+
       - name: Deploy to Cloudflare Pages
         id: deploy
         uses: cloudflare/wrangler-action@v3
