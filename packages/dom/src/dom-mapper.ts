@@ -75,11 +75,43 @@ const wrapWithMarks = (
   return node;
 };
 
+const hasAnyMark = (attrs: Record<string, unknown> | undefined): boolean => {
+  if (!attrs) return false;
+  for (const k in attrs) {
+    if (attrs[k]) return true;
+  }
+  return false;
+};
+
+const isSinglePlainTextDelta = (
+  delta: ReadonlyArray<DeltaItem>,
+): { text: string } | null => {
+  if (delta.length !== 1) return null;
+  const only = delta[0];
+  if (!only || typeof only.insert !== "string") return null;
+  if (hasAnyMark(only.attributes)) return null;
+  return { text: only.insert };
+};
+
 const renderDeltaInto = (
   el: HTMLElement,
   delta: ReadonlyArray<DeltaItem>,
 ): void => {
   const doc = el.ownerDocument;
+  // Fast path: a single plain-text run (the common keystroke case). Mutate
+  // the existing text node's `data` instead of `replaceChildren()` so we
+  // don't allocate per keystroke and we preserve the Text node identity
+  // (so any external reference into it — including the live selection on
+  // the off-chance we get here mid-restore — stays valid).
+  const plain = isSinglePlainTextDelta(delta);
+  if (plain !== null) {
+    if (el.childNodes.length === 1 && el.firstChild instanceof Text) {
+      if (el.firstChild.data !== plain.text) el.firstChild.data = plain.text;
+      return;
+    }
+    el.replaceChildren(doc.createTextNode(plain.text));
+    return;
+  }
   el.replaceChildren();
   let totalLen = 0;
   for (const item of delta) {

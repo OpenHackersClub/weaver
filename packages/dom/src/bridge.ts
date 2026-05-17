@@ -103,24 +103,48 @@ export const attachEditor = (
   let composedTarget: { blockId: string; offset: number } | null = null;
   let composedInitial = "";
 
-  const rerender = (): void => {
-    reconcileTopLevel(editor, host);
-    if (pendingCaret) {
-      writeDomSelection(host, pendingCaret);
-      pendingCaret = null;
+  let flushScheduled = false;
+  let flushing = false;
+
+  // Reconcile DOM to current LoroDoc state and write back any caret set by the
+  // last operation. Synchronous so the local-edit path can call it after each
+  // beforeinput — without that, multiple synchronous beforeinput events
+  // (macOS autocorrect, IME, scripted bursts) all read the same stale DOM
+  // selection at offset 0 and the chars come out reversed ("hello" → "olleh").
+  // Idempotent and re-entrancy guarded so doc.subscribe can call it safely too.
+  const flushRerender = (): void => {
+    if (flushing) return;
+    flushing = true;
+    flushScheduled = false;
+    try {
+      reconcileTopLevel(editor, host);
+      if (pendingCaret) {
+        writeDomSelection(host, pendingCaret);
+        pendingCaret = null;
+      }
+    } finally {
+      flushing = false;
     }
   };
 
+  const rerender = (): void => flushRerender();
+
+  // For remote / agent changes coming through doc.subscribe: dedupe via
+  // microtask so a burst of commits triggers a single reconcile.
+  const scheduleRerender = (): void => {
+    if (flushScheduled || flushing) return;
+    flushScheduled = true;
+    queueMicrotask(() => {
+      if (!flushScheduled) return;
+      flushRerender();
+    });
+  };
+
   const unsub = editor.doc.subscribe(() => {
-    queueMicrotask(rerender);
+    scheduleRerender();
   });
 
-  const onBeforeInput = (ev: Event): void => {
-    if (composing) return;
-    const e = ev as InputEvent;
-    // Always prevent default: the LoroDoc is the single source of truth (D1).
-    // Letting the browser mutate the DOM out-of-band would drift it from the doc.
-    e.preventDefault();
+  const applyBeforeInput = (e: InputEvent): void => {
     let range = readDomSelection(host);
     if (!range) {
       ensureCaretInBlock(editor, host);
@@ -209,6 +233,22 @@ export const attachEditor = (
     // Unknown / unsupported inputType: already preventDefault'd above.
   };
 
+  const onBeforeInput = (ev: Event): void => {
+    if (composing) return;
+    const e = ev as InputEvent;
+    // LoroDoc is the single source of truth (D1); never let the browser
+    // mutate the DOM out-of-band.
+    e.preventDefault();
+    try {
+      applyBeforeInput(e);
+    } finally {
+      // Flush synchronously so the DOM selection is up to date before the
+      // next beforeinput event reads it. See flushRerender() for why this
+      // can't wait for a microtask.
+      flushRerender();
+    }
+  };
+
   const onKeyDown = (ev: KeyboardEvent): void => {
     const modKey = ev.ctrlKey || ev.metaKey;
     if (!modKey) return;
@@ -220,6 +260,7 @@ export const attachEditor = (
     if (!range) return;
     handleToggleMark(editor, range, mark);
     pendingCaret = range;
+    flushRerender();
   };
 
   const onCompositionStart = (): void => {
@@ -257,6 +298,7 @@ export const attachEditor = (
     }
     composedTarget = null;
     composedInitial = "";
+    flushRerender();
   };
 
   const onFocus = (): void => {
