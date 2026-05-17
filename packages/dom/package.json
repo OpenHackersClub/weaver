@@ -10,7 +10,9 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@weaver/core": "workspace:*",
@@ -18,6 +20,9 @@
     "loro-crdt": "^1.12.1"
   },
   "devDependencies": {
-    "typescript": "^5.7.2"
+    "@types/jsdom": "^21.1.7",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { getBlock, getChildren, rootId } from "@weaver/core";
 import { EditorRoot, useEditor } from "@weaver/react";
 import { EXAMPLES, seedExample, type ExampleId } from "./examples.js";
 import { readUrlState, writeUrlState, type DebugPanelId } from "./url-state.js";
@@ -6,19 +7,35 @@ import { DebugPanels } from "./debug-panels.js";
 
 const ALL_DEBUG_PANELS: ReadonlyArray<DebugPanelId> = ["tree", "ops", "vv"];
 
+/** Compact recursive view of the block tree — used by acceptance tests to
+ *  assert structural nesting (which the flat DOM renderer can't reveal). */
+export interface DebugTreeNode {
+  readonly id: string;
+  readonly kind: string | null;
+  readonly children: ReadonlyArray<DebugTreeNode>;
+}
+
 const installDebugGlobals = (editor: ReturnType<typeof useEditor>) => {
   const w = window as unknown as {
     __weaver_debug?: {
       snapshot: () => unknown;
       blocksCount: () => number;
       version: () => unknown;
+      tree: () => ReadonlyArray<DebugTreeNode>;
     };
   };
+  const buildTree = (parentId: string): DebugTreeNode[] =>
+    getChildren(editor, parentId).map((id) => ({
+      id,
+      kind: getBlock(editor, id)?.kind ?? null,
+      children: buildTree(id),
+    }));
   w.__weaver_debug = {
     snapshot: () => editor.doc.toJSON(),
     blocksCount: () =>
       Array.isArray(editor.tree.toJSON()) ? editor.tree.toJSON().length : 0,
     version: () => Object.fromEntries(editor.doc.version().toJSON()),
+    tree: () => buildTree(rootId(editor)),
   };
 };
 
