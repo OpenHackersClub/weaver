@@ -14,6 +14,8 @@ The common pattern across editors today is **AI-as-API**: a generation call retu
 
 The agent runtime (a separate Cloudflare Worker or any other host) holds an attenuated Biscuit token, opens a WebSocket to the same DO the user is connected to, and applies ops. LLM token streams become `LoroText.insert` ops, each committed with `origin: agent-N`. The user sees text appear live. The user can keep typing mid-stream — Loro merges the concurrent edits. Multiple agents work the same way.
 
+**Playground note.** The [Playground](playground.md) ships a **mock/scripted implementation of this peer model** for demo purposes: each mock agent is a separate in-tab `LoroDoc` peer that replays a canned script of edits in-process — same peer primitives (op stream, presence, `agent-pending` mark, peer-scoped undo), no live LLM and no WebSocket transport. It demonstrates the *peer model* described here, not the production transport. See [`playground.md` § Mock AI agents](playground.md#mock-ai-agents).
+
 ### 2.2 Presence + scoped cursors
 
 Loro `EphemeralStore` carries presence records. Each agent's presence entry includes:
@@ -130,5 +132,6 @@ For compliance scenarios ("what did the agent do and why"), we need a separate p
 - [`architecture.md`](architecture.md) — system architecture (where the agent fits)
 - [`hard-problems.md`](hard-problems.md) — streaming UX (§5), programmatic-write rule (§9)
 - [`access-control.md`](access-control.md) — full agent-access-control protocol
+- [`playground.md`](playground.md) — the Mock AI agents feature, a scripted demo of the peer model
 - [`adr/0002-notion-style-block-model.md`](adr/0002-notion-style-block-model.md) — `agent-pending` mark, block kinds
 - [`adr/0004-capability-token-format.md`](adr/0004-capability-token-format.md) — Biscuit attenuation for agent tokens
