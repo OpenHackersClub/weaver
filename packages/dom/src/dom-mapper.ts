@@ -15,6 +15,10 @@ export const tagFor = (kind: BlockKind, level?: number): string => {
     case "numbered-list-item":
     case "to-do":
       return "li";
+    case "code":
+      return "pre";
+    case "divider":
+      return "hr";
     default:
       return "p";
   }
@@ -136,7 +140,9 @@ export const renderBlockElement = (editor: Editor, blockId: BlockId): HTMLElemen
     el.setAttribute(LEVEL_ATTR, String(level));
   }
   el.className = blockClassFor(block.kind);
-  renderDeltaInto(el, editor.commands.text.toDelta(blockId) as ReadonlyArray<DeltaItem>);
+  if (block.hasInline) {
+    renderDeltaInto(el, editor.commands.text.toDelta(blockId) as ReadonlyArray<DeltaItem>);
+  }
   return el;
 };
 
@@ -165,7 +171,11 @@ const updateBlockElement = (
   } else if (el.hasAttribute(LEVEL_ATTR)) {
     el.removeAttribute(LEVEL_ATTR);
   }
-  renderDeltaInto(el, editor.commands.text.toDelta(blockId) as ReadonlyArray<DeltaItem>);
+  if (block.hasInline) {
+    renderDeltaInto(el, editor.commands.text.toDelta(blockId) as ReadonlyArray<DeltaItem>);
+  } else if (el.childNodes.length > 0) {
+    el.replaceChildren();
+  }
   return el;
 };
 

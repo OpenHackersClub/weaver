@@ -10,6 +10,8 @@ export const BlockKindSchema = Schema.Literal(
   "bullet-list-item",
   "numbered-list-item",
   "to-do",
+  "code",
+  "divider",
 );
 export type BlockKind = Schema.Schema.Type<typeof BlockKindSchema>;
 
@@ -21,6 +23,10 @@ export const QuoteAttrs = Schema.Struct({});
 export const BulletAttrs = Schema.Struct({});
 export const NumberedAttrs = Schema.Struct({});
 export const TodoAttrs = Schema.Struct({ checked: Schema.Boolean });
+export const CodeAttrs = Schema.Struct({
+  language: Schema.optional(Schema.String),
+});
+export const DividerAttrs = Schema.Struct({});
 
 export type AttrsFor<K extends BlockKind> = K extends "paragraph"
   ? Schema.Schema.Type<typeof ParagraphAttrs>
@@ -34,7 +40,11 @@ export type AttrsFor<K extends BlockKind> = K extends "paragraph"
           ? Schema.Schema.Type<typeof NumberedAttrs>
           : K extends "to-do"
             ? Schema.Schema.Type<typeof TodoAttrs>
-            : never;
+            : K extends "code"
+              ? Schema.Schema.Type<typeof CodeAttrs>
+              : K extends "divider"
+                ? Schema.Schema.Type<typeof DividerAttrs>
+                : never;
 
 export type Block<K extends BlockKind = BlockKind> = {
   readonly id: BlockId;
@@ -52,7 +62,10 @@ export const blockKindHasInline = (kind: BlockKind): boolean => {
     case "bullet-list-item":
     case "numbered-list-item":
     case "to-do":
+    case "code":
       return true;
+    case "divider":
+      return false;
   }
 };
 
@@ -70,6 +83,10 @@ export const defaultAttrsFor = <K extends BlockKind>(kind: K): AttrsFor<K> => {
       return {} as AttrsFor<K>;
     case "to-do":
       return { checked: false } as AttrsFor<K>;
+    case "code":
+      return {} as AttrsFor<K>;
+    case "divider":
+      return {} as AttrsFor<K>;
   }
   return {} as AttrsFor<K>;
 };

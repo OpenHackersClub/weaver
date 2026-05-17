@@ -1,4 +1,11 @@
-import { LoroDoc, LoroText, LoroTree, LoroTreeNode, type TreeID } from "loro-crdt";
+import {
+  LoroDoc,
+  LoroText,
+  LoroTree,
+  LoroTreeNode,
+  UndoManager,
+  type TreeID,
+} from "loro-crdt";
 import {
   type AttrsFor,
   type Block,
@@ -13,6 +20,13 @@ const TREE_NAME = "content";
 const TEXT_KEY = "text";
 const KIND_KEY = "kind";
 const ATTRS_KEY = "attrs";
+
+/**
+ * Undo-step merge window (ms). All test commits are synchronous, so the
+ * effective control is binary: `MERGE_INTERVAL_MS` lets a step coalesce with
+ * the previous one, `0` forces a fresh step. See `withOrigin`.
+ */
+const MERGE_INTERVAL_MS = 1000;
 
 const DEFAULT_TEXT_STYLES = {
   bold: { expand: "after" as const },
@@ -40,11 +54,42 @@ export interface EditorOptions {
   readonly seed?: boolean;
 }
 
+export interface SelectionRange {
+  readonly anchor: { readonly blockId: BlockId; readonly offset: number };
+  readonly focus: { readonly blockId: BlockId; readonly offset: number };
+}
+
+export interface HistoryCommands {
+  undo(): boolean;
+  redo(): boolean;
+  canUndo(): boolean;
+  canRedo(): boolean;
+  clearHistory(): void;
+  /** Close the current undo-merge window so the next edit starts a fresh step. */
+  flushMergeWindow(): void;
+}
+
+export interface SelectionCommands {
+  set(range: SelectionRange): void;
+  get(): SelectionRange | null;
+  selectAll(): void;
+  collapse(blockId: BlockId, offset: number): void;
+  insertText(value: string): void;
+  deleteRange(): void;
+  getTextContent(): string;
+  getBlockIds(): ReadonlyArray<BlockId>;
+}
+
 export interface Editor {
   readonly doc: LoroDoc;
   readonly tree: LoroTree;
   readonly origin: EditorOrigin;
   readonly commands: EditorCommands;
+  setEditable(editable: boolean): void;
+  isEditable(): boolean;
+  clear(): void;
+  focus(): void;
+  blur(): void;
   dispose(): void;
 }
 
@@ -64,6 +109,8 @@ export interface EditorCommands {
       attrs?: Record<string, unknown>;
     }): void;
     delete(args: { blockId: BlockId }): void;
+    indent(args: { blockId: BlockId }): boolean;
+    outdent(args: { blockId: BlockId }): boolean;
   };
   readonly text: {
     insert(args: { blockId: BlockId; offset: number; value: string }): void;
@@ -77,7 +124,22 @@ export interface EditorCommands {
       mark: MarkKind;
       value?: unknown;
     }): void;
+    readonly mark: {
+      update(args: {
+        blockId: BlockId;
+        range: { start: number; end: number };
+        mark: MarkKind;
+        value: unknown;
+      }): void;
+    };
   };
+  readonly history: HistoryCommands;
+  readonly selection: SelectionCommands;
+}
+
+interface DeltaRun {
+  insert?: string;
+  attributes?: Record<string, unknown>;
 }
 
 const getNode = (tree: LoroTree, id: BlockId): LoroTreeNode | undefined =>
@@ -117,6 +179,95 @@ const childIds = (tree: LoroTree, id: BlockId): BlockId[] => {
   const node = getNode(tree, id);
   if (!node) return [];
   return (node.children() ?? []).map((c) => String(c.id));
+};
+
+/**
+ * Slice a Loro delta to the character range `[start, end)`, preserving each
+ * run's attributes. Used to carry marks across `block.split`.
+ */
+const sliceDelta = (
+  delta: ReadonlyArray<DeltaRun>,
+  start: number,
+  end: number,
+): DeltaRun[] => {
+  const out: DeltaRun[] = [];
+  let cursor = 0;
+  for (const run of delta) {
+    if (typeof run.insert !== "string") continue;
+    const runStart = cursor;
+    const runEnd = cursor + run.insert.length;
+    const overlapStart = Math.max(runStart, start);
+    const overlapEnd = Math.min(runEnd, end);
+    if (overlapEnd > overlapStart) {
+      out.push({
+        insert: run.insert.slice(overlapStart - runStart, overlapEnd - runStart),
+        attributes: run.attributes,
+      });
+    }
+    cursor = runEnd;
+  }
+  return out;
+};
+
+/** Re-apply every mark carried by `delta` onto `text`, offset by `base`. */
+const applyDeltaMarks = (
+  text: LoroText,
+  delta: ReadonlyArray<DeltaRun>,
+  base: number,
+): void => {
+  let cursor = base;
+  for (const run of delta) {
+    if (typeof run.insert !== "string") continue;
+    const len = run.insert.length;
+    if (len > 0 && run.attributes) {
+      for (const [key, val] of Object.entries(run.attributes)) {
+        if (val === undefined || val === null || val === false) continue;
+        text.mark({ start: cursor, end: cursor + len }, key, val);
+      }
+    }
+    cursor += len;
+  }
+};
+
+/** Whether `mark` is present anywhere within `[start, end)` of `delta`. */
+const hasMarkInRange = (
+  delta: ReadonlyArray<DeltaRun>,
+  mark: string,
+  start: number,
+  end: number,
+): boolean => {
+  let cursor = 0;
+  for (const run of delta) {
+    if (typeof run.insert !== "string") continue;
+    const runStart = cursor;
+    const runEnd = cursor + run.insert.length;
+    if (
+      Math.min(runEnd, end) > Math.max(runStart, start) &&
+      run.attributes &&
+      run.attributes[mark] !== undefined
+    ) {
+      return true;
+    }
+    cursor = runEnd;
+  }
+  return false;
+};
+
+/**
+ * Reject mark payloads that violate the typed contract (ADR 0003 §marks).
+ * A `link` value may be either a bare href string or a `{ href }` object;
+ * either way the href must be a non-empty string.
+ */
+const validateMarkValue = (mark: MarkKind, value: unknown): void => {
+  if (mark === "link") {
+    const href =
+      typeof value === "string"
+        ? value
+        : (value as { href?: unknown } | undefined)?.href;
+    if (typeof href !== "string" || href.length === 0) {
+      throw new Error("link mark requires a non-empty `href`");
+    }
+  }
 };
 
 export const rootId = (_editor: Editor): BlockId => ROOT_ID;
@@ -164,31 +315,97 @@ const initBlockNode = (
   }
 };
 
-const withOrigin = <T>(editor: Editor, fn: () => T): T => {
-  const result = fn();
-  editor.doc.commit({ origin: editor.origin });
-  return result;
-};
-
-const seedEmptyDoc = (editor: Editor): void => {
-  if (editor.tree.roots().length > 0) return;
-  withOrigin(editor, () => {
-    const node = editor.tree.createNode();
-    initBlockNode(node, "paragraph", {});
-  });
-};
-
 export const createEditor = (options: EditorOptions = {}): Editor => {
   const doc = new LoroDoc();
   doc.configTextStyle(DEFAULT_TEXT_STYLES);
   const tree = doc.getTree(TREE_NAME);
+  const origin: EditorOrigin = options.origin ?? "user";
+
+  // `undo` is created after the (optional) seed commit so the empty-doc
+  // template is not itself an undo step. History commands close over it.
+  let undo: UndoManager | undefined;
+  let editable = true;
+  let currentSelection: SelectionRange | null = null;
+
+  // Undo-step grouping: consecutive `text.insert`/`text.delete` ops merge into
+  // a single step (one undo per typing burst); every other op forces a fresh
+  // step. `flushMergeWindow` resets the run so the next text op starts fresh.
+  let prevMergeable = false;
+
+  /**
+   * Run a mutation, commit it under the editor's origin, and tell the
+   * UndoManager whether this step may coalesce with the previous one.
+   */
+  const withOrigin = <T>(fn: () => T, mergeable = false): T => {
+    const result = fn();
+    if (undo) {
+      const wantMerge = mergeable && prevMergeable;
+      undo.setMergeInterval(wantMerge ? MERGE_INTERVAL_MS : 0);
+    }
+    doc.commit({ origin });
+    prevMergeable = mergeable;
+    return result;
+  };
+
+  const textLengthOf = (blockId: BlockId): number => {
+    const node = getNode(tree, blockId);
+    if (!node) return 0;
+    const t = getText(node);
+    return t ? t.length : 0;
+  };
+
+  const readTextOf = (blockId: BlockId): string => {
+    const node = getNode(tree, blockId);
+    if (!node) return "";
+    const t = getText(node);
+    return t ? t.toString() : "";
+  };
+
+  /** Flat depth-first list of every block id, in document order. */
+  const documentOrder = (): BlockId[] => {
+    const out: BlockId[] = [];
+    const visit = (id: BlockId): void => {
+      for (const childId of childIds(tree, id)) {
+        out.push(childId);
+        visit(childId);
+      }
+    };
+    visit(ROOT_ID);
+    return out;
+  };
 
   const editor: Editor = {
     doc,
     tree,
-    origin: options.origin ?? "user",
+    origin,
     commands: undefined as unknown as EditorCommands,
+    setEditable: (next: boolean) => {
+      editable = next;
+    },
+    isEditable: () => editable,
+    clear: () => {
+      withOrigin(() => {
+        for (const id of childIds(tree, ROOT_ID)) {
+          const n = getNode(tree, id);
+          if (n) tree.delete(n.id);
+        }
+        const fresh = tree.createNode();
+        initBlockNode(fresh, "paragraph", {});
+      });
+      currentSelection = null;
+    },
+    focus: () => {
+      /* DOM concern — no-op at the core layer */
+    },
+    blur: () => {
+      /* DOM concern — no-op at the core layer */
+    },
     dispose: () => {
+      try {
+        undo?.free();
+      } catch {
+        // already freed
+      }
       try {
         doc.free();
       } catch {
@@ -200,7 +417,7 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
   const commands: EditorCommands = {
     block: {
       insert: ({ parentId, index, kind, attrs }) =>
-        withOrigin(editor, () => {
+        withOrigin(() => {
           const newNode =
             parentId === ROOT_ID
               ? tree.createNode(undefined, index)
@@ -210,13 +427,15 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
         }),
 
       split: ({ blockId, offset }) =>
-        withOrigin(editor, () => {
+        withOrigin(() => {
           const node = getNode(tree, blockId);
           if (!node) throw new Error(`block ${blockId} not found`);
           const kind = getKind(node);
           const text = requireText(node);
           const fullLen = text.length;
           const safeOffset = Math.max(0, Math.min(offset, fullLen));
+          const fullDelta = text.toDelta() as DeltaRun[];
+          const tailDelta = sliceDelta(fullDelta, safeOffset, fullLen);
           const tail = text.slice(safeOffset, fullLen);
           if (tail.length > 0) text.delete(safeOffset, fullLen - safeOffset);
           const parent = node.parent();
@@ -229,24 +448,41 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
           if (tail.length > 0) {
             const newText = ensureText(newNode);
             newText.insert(0, tail);
+            applyDeltaMarks(newText, tailDelta, 0);
           }
           return String(newNode.id);
         }),
 
       merge: ({ prevId, nextId }) =>
-        withOrigin(editor, () => {
+        withOrigin(() => {
           const prev = getNode(tree, prevId);
           const next = getNode(tree, nextId);
           if (!prev || !next) throw new Error("merge: missing block");
           const prevText = requireText(prev);
           const nextText = requireText(next);
+          const nextDelta = nextText.toDelta() as DeltaRun[];
+          const nextLen = nextText.length;
           const tail = nextText.toString();
-          if (tail.length > 0) prevText.insert(prevText.length, tail);
+          const base = prevText.length;
+          if (nextLen > 0) {
+            // The trailing run of `prev` may have `expand: "after"` marks; an
+            // insert at the boundary would bleed them into `next`'s content.
+            const prevDelta = prevText.toDelta() as DeltaRun[];
+            const lastRun = prevDelta[prevDelta.length - 1];
+            const bleedKeys = lastRun?.attributes
+              ? Object.keys(lastRun.attributes)
+              : [];
+            prevText.insert(base, tail);
+            for (const key of bleedKeys) {
+              prevText.unmark({ start: base, end: base + nextLen }, key);
+            }
+            applyDeltaMarks(prevText, nextDelta, base);
+          }
           tree.delete(next.id);
         }),
 
       transform: ({ blockId, newKind, attrs }) =>
-        withOrigin(editor, () => {
+        withOrigin(() => {
           const node = getNode(tree, blockId);
           if (!node) throw new Error(`block ${blockId} not found`);
           setKindAttrs(node, newKind, attrs ?? defaultAttrsFor(newKind));
@@ -254,25 +490,58 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
         }),
 
       delete: ({ blockId }) =>
-        withOrigin(editor, () => {
+        withOrigin(() => {
           const node = getNode(tree, blockId);
           if (!node) return;
           tree.delete(node.id);
+          // The editing surface must never have zero blocks (mirrors
+          // Lexical's no-empty-root invariant).
+          if (tree.roots().length === 0) {
+            const fresh = tree.createNode();
+            initBlockNode(fresh, "paragraph", {});
+          }
+        }),
+
+      indent: ({ blockId }) =>
+        withOrigin(() => {
+          const node = getNode(tree, blockId);
+          if (!node) return false;
+          const parent = node.parent();
+          const siblings = parent ? (parent.children() ?? []) : tree.roots();
+          const idx = siblings.findIndex((n) => String(n.id) === blockId);
+          if (idx <= 0) return false;
+          const prev = siblings[idx - 1]!;
+          const prevChildren = prev.children() ?? [];
+          node.move(prev, prevChildren.length);
+          return true;
+        }),
+
+      outdent: ({ blockId }) =>
+        withOrigin(() => {
+          const node = getNode(tree, blockId);
+          if (!node) return false;
+          const parent = node.parent();
+          if (!parent) return false; // already at the top level
+          const grandparent = parent.parent();
+          const parentIndex = parent.index() ?? 0;
+          node.move(grandparent ?? undefined, parentIndex + 1);
+          return true;
         }),
     },
+
     text: {
       insert: ({ blockId, offset, value }) =>
-        withOrigin(editor, () => {
+        withOrigin(() => {
           const node = getNode(tree, blockId);
           if (!node) throw new Error(`block ${blockId} not found`);
           const text = ensureText(node);
           const len = text.length;
           const safeOffset = Math.max(0, Math.min(offset, len));
           text.insert(safeOffset, value);
-        }),
+        }, true),
 
       delete: ({ blockId, offset, length }) =>
-        withOrigin(editor, () => {
+        withOrigin(() => {
           const node = getNode(tree, blockId);
           if (!node) return;
           const text = getText(node);
@@ -281,21 +550,11 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
           const start = Math.max(0, Math.min(offset, len));
           const removable = Math.max(0, Math.min(length, len - start));
           if (removable > 0) text.delete(start, removable);
-        }),
+        }, true),
 
-      read: (blockId) => {
-        const node = getNode(tree, blockId);
-        if (!node) return "";
-        const text = getText(node);
-        return text ? text.toString() : "";
-      },
+      read: (blockId) => readTextOf(blockId),
 
-      length: (blockId) => {
-        const node = getNode(tree, blockId);
-        if (!node) return 0;
-        const text = getText(node);
-        return text ? text.length : 0;
-      },
+      length: (blockId) => textLengthOf(blockId),
 
       toDelta: (blockId) => {
         const node = getNode(tree, blockId);
@@ -305,43 +564,231 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
       },
 
       toggleMark: ({ blockId, range, mark, value }) =>
-        withOrigin(editor, () => {
+        withOrigin(() => {
           const node = getNode(tree, blockId);
           if (!node) return;
+          // A zero-length range is a silent no-op — Loro's `mark` rejects
+          // `start === end`.
+          if (range.end <= range.start) return;
           const text = ensureText(node);
-          const delta = text.toDelta();
+          const delta = text.toDelta() as DeltaRun[];
           let coverage = 0;
           let cursor = 0;
-          for (const part of delta as Array<{
-            insert?: string;
-            attributes?: Record<string, unknown>;
-          }>) {
+          for (const part of delta) {
             if (typeof part.insert !== "string") continue;
             const partStart = cursor;
             const partEnd = cursor + part.insert.length;
             const overlapStart = Math.max(partStart, range.start);
             const overlapEnd = Math.min(partEnd, range.end);
             if (overlapEnd > overlapStart) {
-              const isOn = !!part.attributes && part.attributes[mark] !== undefined;
+              const isOn =
+                !!part.attributes && part.attributes[mark] !== undefined;
               if (isOn) coverage += overlapEnd - overlapStart;
             }
             cursor = partEnd;
           }
-          const rangeLen = Math.max(0, range.end - range.start);
+          const rangeLen = range.end - range.start;
           const fullyOn = rangeLen > 0 && coverage >= rangeLen;
           if (fullyOn) {
             text.unmark(range, mark);
-          } else {
-            text.mark(range, mark, value ?? true);
+            return;
           }
+          validateMarkValue(mark, value);
+          // `code` and `link` are mutually exclusive over the same span
+          // (specs/lexical-parity.md §2).
+          if (
+            mark === "code" &&
+            hasMarkInRange(delta, "link", range.start, range.end)
+          ) {
+            text.unmark(range, "link");
+          } else if (
+            mark === "link" &&
+            hasMarkInRange(delta, "code", range.start, range.end)
+          ) {
+            text.unmark(range, "code");
+          }
+          text.mark(range, mark, value ?? true);
         }),
+
+      mark: {
+        update: ({ blockId, range, mark, value }) =>
+          withOrigin(() => {
+            const node = getNode(tree, blockId);
+            if (!node) return;
+            if (range.end <= range.start) return;
+            validateMarkValue(mark, value);
+            const text = ensureText(node);
+            text.mark(range, mark, value ?? true);
+          }),
+      },
+    },
+
+    history: {
+      undo: () => undo?.undo() ?? false,
+      redo: () => undo?.redo() ?? false,
+      canUndo: () => undo?.canUndo() ?? false,
+      canRedo: () => undo?.canRedo() ?? false,
+      clearHistory: () => undo?.clear(),
+      flushMergeWindow: () => {
+        prevMergeable = false;
+      },
+    },
+
+    selection: {
+      set: (range) => {
+        currentSelection = {
+          anchor: { ...range.anchor },
+          focus: { ...range.focus },
+        };
+      },
+
+      get: () => currentSelection,
+
+      selectAll: () => {
+        const order = documentOrder();
+        const first = order[0];
+        const last = order[order.length - 1];
+        if (first === undefined || last === undefined) {
+          currentSelection = null;
+          return;
+        }
+        currentSelection = {
+          anchor: { blockId: first, offset: 0 },
+          focus: { blockId: last, offset: textLengthOf(last) },
+        };
+      },
+
+      collapse: (blockId, offset) => {
+        const clamped = Math.max(0, Math.min(offset, textLengthOf(blockId)));
+        currentSelection = {
+          anchor: { blockId, offset: clamped },
+          focus: { blockId, offset: clamped },
+        };
+      },
+
+      getTextContent: () => {
+        const sel = currentSelection;
+        if (!sel) return "";
+        const order = documentOrder();
+        const ai = order.indexOf(sel.anchor.blockId);
+        const fi = order.indexOf(sel.focus.blockId);
+        if (ai < 0 || fi < 0) return "";
+        const [start, end] =
+          ai <= fi ? [sel.anchor, sel.focus] : [sel.focus, sel.anchor];
+        if (start.blockId === end.blockId) {
+          return readTextOf(start.blockId).slice(start.offset, end.offset);
+        }
+        const ids = order.slice(Math.min(ai, fi), Math.max(ai, fi) + 1);
+        const parts: string[] = [];
+        for (let i = 0; i < ids.length; i++) {
+          const id = ids[i]!;
+          const text = readTextOf(id);
+          if (i === 0) parts.push(text.slice(start.offset));
+          else if (i === ids.length - 1) parts.push(text.slice(0, end.offset));
+          else parts.push(text);
+        }
+        return parts.join("\n");
+      },
+
+      getBlockIds: () => {
+        const sel = currentSelection;
+        if (!sel) return [];
+        const order = documentOrder();
+        const ai = order.indexOf(sel.anchor.blockId);
+        const fi = order.indexOf(sel.focus.blockId);
+        if (ai < 0 || fi < 0) return [];
+        return order.slice(Math.min(ai, fi), Math.max(ai, fi) + 1);
+      },
+
+      insertText: (value) => mutateSelectionRange(value),
+      deleteRange: () => mutateSelectionRange(null),
     },
   };
+
+  /**
+   * Replace the current selection with `value` (or just delete it when
+   * `value` is `null`). A multi-block range merges the touched blocks into
+   * the anchor block, mirroring Lexical's `$insertText` on a range.
+   */
+  function mutateSelectionRange(value: string | null): void {
+    const sel = currentSelection;
+    if (!sel) return;
+    const order = documentOrder();
+    const ai = order.indexOf(sel.anchor.blockId);
+    const fi = order.indexOf(sel.focus.blockId);
+    if (ai < 0 || fi < 0) return;
+    const [start, end] =
+      ai <= fi ? [sel.anchor, sel.focus] : [sel.focus, sel.anchor];
+
+    if (start.blockId === end.blockId) {
+      const len = end.offset - start.offset;
+      if (len > 0) {
+        commands.text.delete({
+          blockId: start.blockId,
+          offset: start.offset,
+          length: len,
+        });
+      }
+      if (value) {
+        commands.text.insert({
+          blockId: start.blockId,
+          offset: start.offset,
+          value,
+        });
+      }
+    } else {
+      const ids = order.slice(Math.min(ai, fi), Math.max(ai, fi) + 1);
+      const startLen = textLengthOf(start.blockId);
+      if (startLen > start.offset) {
+        commands.text.delete({
+          blockId: start.blockId,
+          offset: start.offset,
+          length: startLen - start.offset,
+        });
+      }
+      for (let i = 1; i < ids.length; i++) {
+        const id = ids[i]!;
+        if (id === end.blockId) {
+          if (end.offset > 0) {
+            commands.text.delete({ blockId: id, offset: 0, length: end.offset });
+          }
+        } else {
+          const l = textLengthOf(id);
+          if (l > 0) commands.text.delete({ blockId: id, offset: 0, length: l });
+        }
+        commands.block.merge({ prevId: start.blockId, nextId: id });
+      }
+      if (value) {
+        commands.text.insert({
+          blockId: start.blockId,
+          offset: start.offset,
+          value,
+        });
+      }
+    }
+
+    const caret = start.offset + (value ? value.length : 0);
+    currentSelection = {
+      anchor: { blockId: start.blockId, offset: caret },
+      focus: { blockId: start.blockId, offset: caret },
+    };
+  }
 
   (editor as { commands: EditorCommands }).commands = commands;
 
   if (options.seed !== false) {
-    seedEmptyDoc(editor);
+    seedEmptyDoc();
+  }
+
+  // Created last so neither the seed nor any pre-history setup is an undo step.
+  undo = new UndoManager(doc, { mergeInterval: MERGE_INTERVAL_MS });
+
+  function seedEmptyDoc(): void {
+    if (tree.roots().length > 0) return;
+    withOrigin(() => {
+      const node = tree.createNode();
+      initBlockNode(node, "paragraph", {});
+    });
   }
 
   return editor;

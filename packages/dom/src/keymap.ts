@@ -55,26 +55,137 @@ const latestCaret = (editor: Editor, prev: DomCaret, candidate: DomCaret): DomCa
 };
 
 const MARKDOWN_HEADING = /^(#{1,6}) $/;
+const MARKDOWN_NUMBERED = /^\d+\. $/;
+
+interface InlineShortcut {
+  readonly re: RegExp;
+  readonly mark: "bold" | "italic" | "strike" | "code";
+}
+
+// Trailing-space inline-delimiter shortcuts. Each captures the inner text.
+const INLINE_SHORTCUTS: ReadonlyArray<InlineShortcut> = [
+  { re: /\*\*([^*\n]+)\*\* $/, mark: "bold" },
+  { re: /_([^_\n]+)_ $/, mark: "italic" },
+  { re: /~~([^~\n]+)~~ $/, mark: "strike" },
+  { re: /`([^`\n]+)` $/, mark: "code" },
+];
+
+const applyInlineShortcut = (editor: Editor, caret: DomCaret): boolean => {
+  const text = editor.commands.text.read(caret.blockId);
+  for (const { re, mark } of INLINE_SHORTCUTS) {
+    const m = re.exec(text);
+    if (!m) continue;
+    const inner = m[1] ?? "";
+    const matchStart = m.index;
+    const matchLen = m[0].length;
+    editor.commands.text.delete({
+      blockId: caret.blockId,
+      offset: matchStart,
+      length: matchLen,
+    });
+    editor.commands.text.insert({
+      blockId: caret.blockId,
+      offset: matchStart,
+      value: `${inner} `,
+    });
+    editor.commands.text.toggleMark({
+      blockId: caret.blockId,
+      range: { start: matchStart, end: matchStart + inner.length },
+      mark,
+    });
+    return true;
+  }
+  return false;
+};
 
 const maybeApplyMarkdownShortcut = (editor: Editor, caret: DomCaret): void => {
   const block = getBlock(editor, caret.blockId);
   if (!block) return;
   if (block.kind !== "paragraph") return;
   const text = editor.commands.text.read(caret.blockId);
-  const m = MARKDOWN_HEADING.exec(text);
-  if (!m) return;
-  const hashes = m[1] ?? "";
-  const level = Math.max(1, Math.min(6, hashes.length)) as 1 | 2 | 3 | 4 | 5 | 6;
-  editor.commands.text.delete({
+
+  const transformBlock = (
+    consumed: number,
+    newKind: BlockKind,
+    attrs: Record<string, unknown> = {},
+  ): void => {
+    if (consumed > 0) {
+      editor.commands.text.delete({
+        blockId: caret.blockId,
+        offset: 0,
+        length: consumed,
+      });
+    }
+    editor.commands.block.transform({
+      blockId: caret.blockId,
+      newKind,
+      attrs,
+    });
+  };
+
+  // Headings — `# `..`###### `.
+  const heading = MARKDOWN_HEADING.exec(text);
+  if (heading) {
+    const hashes = heading[1] ?? "";
+    const level = Math.max(1, Math.min(6, hashes.length)) as 1 | 2 | 3 | 4 | 5 | 6;
+    transformBlock(hashes.length + 1, "heading", { level });
+    return;
+  }
+
+  // Divider — check before bullet (`*** ` must not be read as `* `).
+  if (text === "--- " || text === "*** ") {
+    transformBlock(4, "divider");
+    return;
+  }
+
+  // Code fence — 3 backticks + space.
+  if (text === "``` ") {
+    transformBlock(4, "code");
+    return;
+  }
+
+  // Quote.
+  if (text === "> ") {
+    transformBlock(2, "quote");
+    return;
+  }
+
+  // Bullet list — `- ` or `* `.
+  if (text === "- " || text === "* ") {
+    transformBlock(2, "bullet-list-item");
+    return;
+  }
+
+  // Numbered list — `\d+. `.
+  if (MARKDOWN_NUMBERED.test(text)) {
+    transformBlock(text.length, "numbered-list-item");
+    return;
+  }
+
+  // To-do — `[ ] ` / `[x] ` / `[X] `.
+  if (text === "[ ] ") {
+    transformBlock(4, "to-do", { checked: false });
+    return;
+  }
+  if (text === "[x] " || text === "[X] ") {
+    transformBlock(4, "to-do", { checked: true });
+    return;
+  }
+
+  // No block-level transform fired — try inline delimiter shortcuts.
+  applyInlineShortcut(editor, caret);
+};
+
+export const handleInsertLineBreak = (
+  editor: Editor,
+  caret: DomCaret,
+): ApplyResult => {
+  editor.commands.text.insert({
     blockId: caret.blockId,
-    offset: 0,
-    length: hashes.length + 1,
+    offset: caret.offset,
+    value: "\n",
   });
-  editor.commands.block.transform({
-    blockId: caret.blockId,
-    newKind: "heading",
-    attrs: { level },
-  });
+  return { caret: { blockId: caret.blockId, offset: caret.offset + 1 } };
 };
 
 export const handleEnter = (editor: Editor, caret: DomCaret): ApplyResult => {

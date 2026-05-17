@@ -10,6 +10,7 @@ import {
   handleBackspace,
   handleDeleteForward,
   handleEnter,
+  handleInsertLineBreak,
   handleInsertText,
   handleToggleMark,
 } from "./keymap.js";
@@ -99,6 +100,11 @@ export const attachEditor = (
   reconcileTopLevel(editor, host);
 
   let pendingCaret: DomRange | null = null;
+  // The block most recently targeted by Tab/Shift+Tab. An indent nests the
+  // block under a sibling, and `reconcileTopLevel` only renders top-level
+  // blocks — so the nested element leaves the DOM and the live selection
+  // with it. Tracking the id lets a follow-up Shift+Tab still target it.
+  let lastIndentTarget: BlockId | null = null;
   let composing = false;
   let composedTarget: { blockId: string; offset: number } | null = null;
   let composedInitial = "";
@@ -185,8 +191,9 @@ export const attachEditor = (
       return;
     }
     if (inputType === "insertLineBreak") {
-      // For now treat as insertParagraph (block split). Soft-break is post-MVP.
-      const res = handleEnter(editor, range.anchor);
+      // Soft line break — insert a "\n" into the current block's text; never
+      // create a new block. specs/lexical-parity.md §1 LineBreakNode.
+      const res = handleInsertLineBreak(editor, range.anchor);
       pendingCaret = { anchor: res.caret, focus: res.caret, collapsed: true };
       return;
     }
@@ -250,9 +257,55 @@ export const attachEditor = (
   };
 
   const onKeyDown = (ev: KeyboardEvent): void => {
+    // Tab / Shift+Tab — indent / outdent the current block. No modifier
+    // required, so handle it before the modifier early-return below.
+    if (ev.key === "Tab") {
+      ev.preventDefault();
+      const range = readDomSelection(host);
+      const blockId = range?.anchor.blockId ?? lastIndentTarget;
+      if (blockId) {
+        if (ev.shiftKey) editor.commands.block.outdent({ blockId });
+        else editor.commands.block.indent({ blockId });
+        lastIndentTarget = blockId;
+        flushRerender();
+      }
+      return;
+    }
+
     const modKey = ev.ctrlKey || ev.metaKey;
     if (!modKey) return;
     const lower = ev.key.toLowerCase();
+
+    // Ctrl/Cmd+Z — undo; Ctrl/Cmd+Shift+Z — redo.
+    if (lower === "z") {
+      ev.preventDefault();
+      if (ev.shiftKey) editor.commands.history.redo();
+      else editor.commands.history.undo();
+      flushRerender();
+      return;
+    }
+
+    // Ctrl/Cmd+A — select from the start of the first block to the end of
+    // the last. The doc is unchanged, so no rerender.
+    if (lower === "a") {
+      ev.preventDefault();
+      const blocks = Array.from(
+        host.querySelectorAll("[data-block-id]"),
+      ) as HTMLElement[];
+      const firstId = blocks[0] ? blockIdOf(blocks[0]) : null;
+      const lastEl = blocks[blocks.length - 1];
+      const lastId = lastEl ? blockIdOf(lastEl) : null;
+      if (firstId && lastId) {
+        const lastLen = editor.commands.text.length(lastId);
+        writeDomSelection(host, {
+          anchor: { blockId: firstId, offset: 0 },
+          focus: { blockId: lastId, offset: lastLen },
+          collapsed: false,
+        });
+      }
+      return;
+    }
+
     const mark = MARK_FROM_KEY[lower];
     if (!mark) return;
     ev.preventDefault();
