@@ -72,6 +72,21 @@ export const nav: NavSection[] = [
         label: "Editor Comparison",
         blurb: "weaver vs Lexical, ProseMirror, Tiptap, BlockSuite, others.",
       },
+      {
+        slug: "lexical-parity",
+        label: "Lexical Parity",
+        blurb: "Catalog of Lexical features mapped to weaver primitives, with the v1 outcome rubric.",
+      },
+      {
+        slug: "benchmarks",
+        label: "Benchmarks",
+        blurb: "What we measure, how, the v1 pass bars, and the outcome rubric.",
+      },
+      {
+        slug: "playground",
+        label: "Playground",
+        blurb: "Standalone demo webapp shipped to Cloudflare Pages; spec + outcome rubric.",
+      },
     ],
   },
   {
