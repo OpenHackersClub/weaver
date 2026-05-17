@@ -10,7 +10,12 @@
     "build": "pnpm --filter @weaver/docs build",
     "preview": "pnpm --filter @weaver/docs preview",
     "docs:dev": "pnpm --filter @weaver/docs dev",
-    "docs:build": "pnpm --filter @weaver/docs build"
+    "docs:build": "pnpm --filter @weaver/docs build",
+    "playground:dev": "pnpm --filter @weaver/playground dev",
+    "playground:build": "pnpm --filter @weaver/playground build",
+    "playground:preview": "pnpm --filter @weaver/playground preview",
+    "playground:test": "pnpm --filter @weaver/playground test",
+    "test": "pnpm --filter @weaver/core test"
   },
   "engines": {
     "node": ">=20.18.0"

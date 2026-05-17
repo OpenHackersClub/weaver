@@ -1,0 +1,33 @@
+{
+  "name": "@weaver/playground",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Weaver playground SPA — demos every block kind, mark, and agent affordance.",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5180",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 5180",
+    "typecheck": "tsc --noEmit",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@weaver/core": "workspace:*",
+    "@weaver/dom": "workspace:*",
+    "@weaver/react": "workspace:*",
+    "effect": "^3.21.2",
+    "loro-crdt": "^1.12.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.6.0"
+  }
+}
