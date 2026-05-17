@@ -18,12 +18,14 @@ The Playground is the **answer to "show me the editor"**. It exercises the entir
 
 1. **A working editor instance** populated with a curated demo doc (~50 blocks, every kind, every mark, nested lists, callouts, code blocks with multiple languages, a table, images, embeds, mentions).
 2. **Example switcher** — empty doc, demo doc, large doc (10 k blocks for perf demos), agent-collab demo (an agent peer running scripted edits), multi-tier doc (public / internal / confidential).
+**Note on the agent demo:** the agent runtime runs *in-tab* and the two LoroDoc peers exchange ops in-process. This is a demo-only simplification — production agents connect over WebSocket to the Durable Object as a separate peer (see [`ai-agent.md` §2.1](ai-agent.md)). The Playground demo shows the *peer model*, not the *production transport*.
+
 3. **Live debug overlays** (toggleable, off by default):
    - **Block tree** — collapsible view of `LoroTree` structure with per-node `kind`, attrs, child count.
    - **Op log** — recent Loro ops with `origin`, version vector delta, container target.
    - **Version vector** — current per-peer state.
    - **Peer panel** — connected peers (humans + agents) with presence cursor positions.
-   - **Subdoc map** — which subdoc each block belongs to; color-coded.
+   - **Subdoc map** — which subdoc (a *separate* LoroDoc per [`access-control.md` §5](access-control.md)) each block belongs to; color-coded by membership.
    - **Serialized state** — JSON snapshot + binary update bytes (hex preview).
 4. **Time travel** — slider that calls `doc.checkout(version)` and re-renders.
 5. **Agent demo controls** — start/stop a scripted agent peer; "ask" panel that sends a prompt to a stub agent runtime.
@@ -83,14 +85,14 @@ The Playground is **shipped** when the following criteria are independently grad
 ### Coverage
 - Every block kind listed in [`block-model.md` §3 "Block kinds shipped in v1"](block-model.md) is present at least once in the default demo doc.
 - Every mark listed in [`block-model.md` §3 "Marks shipped in v1"](block-model.md) is present at least once in the default demo doc.
-- The "large doc" example contains ≥ 10 000 blocks and loads to first paint within a documented budget (see [`benchmarks.md` §"Init latency"](benchmarks.md)).
+- The "large doc" example contains ≥ 10 000 blocks and reaches first paint within ≤ 1500 ms on the canonical machine defined in [`benchmarks.md` §4.5](benchmarks.md).
 - The "agent-collab" example shows a visible second peer cursor with `origin: agent-N` on at least one streaming insertion.
-- The "multi-tier" example renders blocks tagged with at least three distinct `subdoc` values, each visually distinguishable.
+- The "multi-tier" example renders blocks that belong to at least three distinct subdocs (separate LoroDocs per [`access-control.md` §5](access-control.md)). Each subdoc's blocks render with a distinct CSS border color visible in the DOM; a screenshot shows three distinct colors.
 
 ### Debug overlays
 - Each of the six debug panels (block tree, op log, version vector, peer panel, subdoc map, serialized state) is independently toggleable via URL param and via UI.
 - The op log shows `origin` on every entry.
-- The version vector updates within 200 ms of any local edit.
+- The version-vector panel's displayed timestamp changes after a single keystroke within 200 ms (measured: subscribe to its text-content mutation; record the delta from the `keydown` event).
 - The time-travel slider, when scrubbed, re-renders the editor to the document state at that version with no console errors.
 
 ### Self-host snippet
@@ -99,21 +101,26 @@ The Playground is **shipped** when the following criteria are independently grad
 - Pasting the snippet into a fresh Vite + React app yields a working editor with the same default plugins as the Playground's default-example configuration. (Reviewer test: run the snippet locally; verify the editor renders.)
 
 ### Deployment
-- The site is reachable at `https://weaver-playground.pages.dev` with a TLS cert that is valid for ≥ 30 days.
+- `GET /` returns 200 and the TLS cert presented for `weaver-playground.pages.dev` has `notAfter` ≥ 30 days from the day of the grader's check.
 - The build size is ≤ 1.5 MB gzipped including WASM (`docs site` baseline is < 200 KB; the Playground is allowed more because of WASM).
 - The deploy workflow runs in ≤ 90 s wall-clock per push and is wired to the `main` branch.
 - A push that breaks the build leaves the previously-deployed version in place (Pages atomic deploy; no half-state).
 
 ### Output quality
-- All routes return 200 (no 404 surprises). `/perf` returns 200 even if no benchmark has been seeded.
-- The site renders with no console errors and no uncaught promise rejections on a clean Chromium load.
+- `GET /`, `GET /perf`, `GET /about`, `GET /embed/<any-example-id>`, and `GET /?example=<each-example-id>` all return 200.
+- Loading `/` and `/perf` in a clean Chromium produces zero console errors and zero uncaught promise rejections (verified via `Page.on('pageerror')` and `Page.on('console')` filtering `error` / `warning`).
 - The site is usable in a 1024-wide viewport without horizontal scroll.
+- An [axe-core](https://github.com/dequelabs/axe-core) accessibility scan of `/` reports zero `serious` or `critical` violations.
+- The HTTP response for `/` carries `Content-Security-Policy`, `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`, and `Referrer-Policy` headers (verified by `curl -I`).
 
 ### Reproducibility
-- Anyone with the repo and the two CF secrets can `pnpm install && pnpm --filter @weaver/playground build && wrangler pages deploy apps/playground/dist --project-name=weaver-playground` and produce a deploy identical to CI's output (byte-for-byte deterministic where the build chain allows; same set of routes and asset hashes otherwise).
+- Anyone with the repo and the two CF secrets can `pnpm install && pnpm --filter @weaver/playground build && wrangler pages deploy apps/playground/dist --project-name=weaver-playground` and produce a deploy where (a) the set of emitted route paths is identical to CI's artifact and (b) the SHA-256 of `index.html` equals CI's artifact's SHA-256.
 
 ## See also
 
 - [`benchmarks.md`](benchmarks.md) — the perf suite the Playground's `/perf` route runs.
 - [`lexical-parity.md`](lexical-parity.md) — the feature catalog the Playground demonstrates.
+- [ADR 0001 — Loro over Y.js](adr/0001-adopt-loro-over-yjs.md) — the Loro perf claims the 10k-block example exercises.
+- [ADR 0002 — Notion-style block model](adr/0002-notion-style-block-model.md) — the block-kind catalog the demo doc covers.
+- [ADR 0005 — Trust model](adr/0005-trust-model.md) — why a hard-coded baked-in capability token in the agent demo is acceptable (cooperative-org / trusted-server).
 - [Lexical's Playground source](https://github.com/facebook/lexical/tree/main/packages/lexical-playground) — the reference we're modeling against.

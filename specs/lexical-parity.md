@@ -23,6 +23,7 @@ Lexical's `node` is weaver's **block** (`LoroTreeNode` + `LoroMap` of typed attr
 | Lexical node | weaver kind | Status | Notes |
 |---|---|---|---|
 | `RootNode` | (implicit; the `LoroTree` root) | ✅ | Not a user-visible block; structural. |
+| `TabNode` | inline `	` (literal tab) inside `LoroText`, plus a `tab-indent` plugin (`@weaver/plugins-tab`) | 🔁 | Lexical ships `TabNode` + `LexicalTabIndentationPlugin`. We model the character in inline text; structural indent for lists uses `block.indent`/`block.outdent` directly. |
 | `ParagraphNode` | `paragraph` | ✅ | Default block; markdown shortcut to other kinds. |
 | `TextNode` (text leaves with format) | `LoroText` + marks | ✅ | Inline text is `LoroText`; format is CRDT `mark/unmark`. Lexical's "format bitmask" is encoded as overlapping marks. |
 | `LineBreakNode` (soft break) | inline ` ` or `<br>` analog inside `LoroText` | ✅ | Soft break inside a text-bearing block. |
@@ -36,16 +37,20 @@ Lexical's `node` is weaver's **block** (`LoroTreeNode` + `LoroMap` of typed attr
 | `CodeHighlightNode` | inline span emitted by tree-sitter highlighter | ✅ | Not a CRDT op; render-time decoration. |
 | `LinkNode` | `link` mark | ✅ | weaver models link as a mark over `LoroText`, not a separate element. |
 | `AutoLinkNode` | `link` mark + auto-linker plugin | 🔁 | Plugin detects URL-shaped runs and applies `link`. |
-| `OverflowNode` (Lexical's character-limit affordance) | — | ⏳ | Not a v1 concern; plugins can implement. |
+| `OverflowNode` (Lexical's character-limit affordance) | — | ⏳ | Deferred. Lexical ships `@lexical/overflow` + `LexicalCharacterLimitPlugin`; weaver plugins can implement equivalent behavior over `LoroText` length. |
+| `HorizontalRuleNode` (already row above, but Lexical also exports `@lexical/react/LexicalHorizontalRuleNode`) | `divider` block kind | ✅ | Same block as `HorizontalRuleNode`; named separately for cross-ref. |
+| `PageBreakNode` (playground) | `divider` with `pageBreak: true` attr **or** a future `page-break` plugin block kind | 🔁 | First-party Lexical playground node; deferred to a v1 plugin if requested. |
+| Embed-shaped playground nodes — `FigmaNode`, `TweetNode`, `YouTubeNode`, `ExcalidrawNode` | `embed` block kind with allowlisted providers | 🔁 | These are Lexical playground demos showing how to register provider-specific embeds; weaver covers them through one polymorphic `embed` kind in v1. |
+| `AutocompleteNode` (playground) | inline "agent-pending" preview rendered via `agent-pending` mark | 🔁 | Lexical's autocomplete is a custom node; weaver's equivalent is the agent-suggestion overlay (see `ai-agent.md`). |
 | `MarkNode` (annotations) | `comment-anchor` mark | ✅ | weaver uses an internal mark to anchor comment threads; the comment payload itself lives in a sibling LoroDoc container. |
 | `TableNode` / `TableRowNode` / `TableCellNode` | `table` / `table-row` / `table-cell` block kinds | ✅ | Block-table, not Database (see [ADR 0002](adr/0002-notion-style-block-model.md)). Fixed columns. |
 | `HorizontalRuleNode` | `divider` | ✅ | |
 | `ImageNode` (playground-only in Lexical) | `image` block kind | ✅ | OPFS cache + R2. |
 | Custom `EmbedBlockNode` (e.g. YouTube, Twitter in playground) | `embed` block kind | ✅ | Allowlisted providers; iframe sandbox. |
-| `HashtagNode` (playground) | inline plugin-registered span + `mention` analog | 🔁 | Plugin in v1 first-party set if demand exists; not core. |
+| `HashtagNode` | inline plugin-registered span + `mention` analog | 🔁 | Lexical ships this as a published package (`@lexical/hashtag` + `LexicalHashtagPlugin`), not playground-only. v1 first-party set if demand exists; not core. |
 | `KeywordNode` (playground) | — | ⏳ | Niche; not in v1. |
 | `EmojiNode` (playground replacement) | — | 🔁 | Trivial plugin; OS emoji is the default. |
-| `CollapsibleContainerNode` (toggle in playground) | `toggle` block kind | ✅ | |
+| `CollapsibleContainerNode` (toggle in `lexical-playground/src/plugins/CollapsiblePlugin/`) | `toggle` block kind | ✅ | Lexical's collapsible lives in the playground source, not a first-party `@lexical/*` package. |
 | `LayoutContainerNode` / `LayoutItemNode` (multi-column in playground) | — | ⏳ | Multi-column layout not in v1; could be a plugin in v2. |
 | `PollNode` / `StickyNode` / `EquationNode` (playground curiosities) | — | ⏳ | Demo-only in Lexical too; not committed for v1. |
 
@@ -67,7 +72,9 @@ Lexical encodes formatting as a bitmask on `TextNode`. weaver encodes it as over
 
 ## 3. Commands & editor operations
 
-Lexical's command bus is `editor.dispatchCommand(COMMAND, payload)`. weaver's command bus is an Effect-TS surface (`@weaver/core`'s command registry — see [`architecture.md` §4](architecture.md#4-effect-ts--where-it-shines-where-it-doesnt)).
+Lexical's command bus is `editor.dispatchCommand(COMMAND, payload)`. weaver's command bus is the Effect-TS surface in `@weaver/core` (see [`architecture.md` §4](architecture.md#4-effect-ts--where-it-shines-where-it-doesnt)).
+
+> The command symbols below (`text.*`, `block.*`, `selection.*`, `clipboard.*`) name the v1 command-bus surface. Their full enumeration belongs in a forthcoming `command-bus.md` spec; `block.*` structural commands are already defined in [`block-model.md` §3](block-model.md). Until `command-bus.md` lands, treat each row as a contract the future spec must keep.
 
 | Lexical command (or capability) | weaver equivalent | Status |
 |---|---|---|
@@ -75,12 +82,18 @@ Lexical's command bus is `editor.dispatchCommand(COMMAND, payload)`. weaver's co
 | Element formatting (`FORMAT_ELEMENT_COMMAND` — align) | `block.setAttr(blockId, "align", value)` for align-aware kinds | ✅ |
 | Insert paragraph / line break | `block.split` / soft-break op | ✅ |
 | Insert node at selection (`INSERT_…_COMMAND` family) | `block.insert(parentId, index, kind, attrs)` | ✅ |
+| `INDENT_CONTENT_COMMAND` / `OUTDENT_CONTENT_COMMAND` | `block.indent(blockId)` / `block.outdent(blockId)` | ✅ |
+| `INSERT_TAB_COMMAND` | `text.insertTab(blockId, offset)` (inserts a tab character; structural indent goes through `block.indent`) | ✅ |
 | Remove text / nodes | `block.delete`, `text.delete` | ✅ |
 | Undo / redo (`UNDO_COMMAND`, `REDO_COMMAND`) | Loro `UndoManager` peer-scoped by `origin` (see [ADR 0001](adr/0001-adopt-loro-over-yjs.md)) | ✅ |
+| `CLEAR_HISTORY_COMMAND` | `editor.clearHistory()` — drops the `UndoManager` stack without touching the doc | ✅ |
+| `CLEAR_EDITOR_COMMAND` | `editor.clear()` — replaces the LoroDoc content with the empty-doc template | ✅ |
 | Selection ops (`SELECT_ALL_COMMAND` etc.) | weaver `selection.*` commands operating on `Cursor` anchors | ✅ |
-| Focus / blur | `editor.focus()` / `editor.blur()` on the surface | ✅ |
-| Drag & drop nodes | `block.move(blockId, newParentId, newIndex)` driven from the drag handle UI | ✅ |
-| Clipboard (copy / cut / paste with HTML + plain + custom mime) | `clipboard.*` surface with HTML / Markdown / `weaver+loro` binary serialization | ✅ |
+| `SELECTION_CHANGE_COMMAND` (notification) | `useSelection()` hook subscribes to selection changes; no imperative bus event needed | ✅ |
+| Keyboard (`KEY_*_COMMAND` family — arrows, enter, backspace, etc.) | core keymap in `@weaver/dom`; plugins register key handlers via the plugin contract | ✅ |
+| Focus / blur (`FOCUS_COMMAND`, `BLUR_COMMAND`) | `editor.focus()` / `editor.blur()` on the surface | ✅ |
+| Drag & drop (`DRAGSTART_COMMAND` / `DRAGOVER_COMMAND` / `DRAGEND_COMMAND` / `DROP_COMMAND`) | drag handle UI dispatches `block.move(blockId, newParentId, newIndex)` | ✅ |
+| Clipboard (`COPY_COMMAND` / `CUT_COMMAND` / `PASTE_COMMAND`) | `clipboard.*` surface with HTML / Markdown / `weaver+loro` binary serialization | ✅ |
 | `CAN_UNDO_COMMAND` / `CAN_REDO_COMMAND` introspection | `useUndoState()` hook | ✅ |
 | Read-only mode | `editor.setEditable(false)` toggle | ✅ |
 
@@ -101,15 +114,21 @@ Lexical ships ~30 packages under `@lexical/*`. weaver bundles equivalent behavio
 | `CodeHighlightPlugin` | core via tree-sitter for `code` blocks | ✅ |
 | `TablePlugin` | core; `table` kind is built-in | ✅ |
 | `EmojiPickerPlugin` | plugin (`@weaver/plugins-emoji`) | 🔁 |
-| `MentionsPlugin` | core; `mention` is a built-in inline kind | ✅ |
+| `TypeaheadMenuPlugin` (the underpinning Lexical actually ships; "MentionsPlugin" in the wild is a playground example built on top) | core; `mention` is a built-in inline-mode block kind; typeahead menu UI lives in `@weaver/react` | ✅ |
 | `HashtagPlugin` | plugin if needed | 🔁 |
 | `DraggableBlockPlugin` (block handle drag) | core UI (`@weaver/react`'s drag handle) | ✅ |
-| `FloatingTextFormatToolbarPlugin` | core UI (floating toolbar in `@weaver/react`) | ✅ |
+| `FloatingTextFormatToolbarPlugin` (Lexical playground) | core UI (floating toolbar in `@weaver/react`) | ✅ |
+| `HorizontalRulePlugin` (`@lexical/react`) | core; `divider` is a built-in block kind | ✅ |
+| `TabIndentationPlugin` (`@lexical/react`) | core keymap for Tab / Shift-Tab → `block.indent` / `block.outdent` (structural) and `text.insertTab` (inline) | ✅ |
+| `ClearEditorPlugin` | core; `editor.clear()` command | ✅ |
+| `CharacterLimitPlugin` (`@lexical/react`, paired with `@lexical/overflow`) | — | ⏳ |
+| `AutoEmbedPlugin` (Lexical playground) | plugin (`@weaver/plugins-embed`) — paste-URL → `embed` block | 🔁 |
+| `@lexical/headless` (no-DOM editor for SSR / server-side) | — | ⏳ — server-side LoroDoc operates without a DOM today; a typed wrapper for "headless" use lands when there is a customer for it. |
 | `SpeechToTextPlugin` | — | ⏳ |
-| `SharedHistoryPlugin` / `CollaborationPlugin` (Y.js) | core; CRDT collab is native, not a plugin (see [ADR 0001](adr/0001-adopt-loro-over-yjs.md)) | ✅ |
+| `CollaborationPlugin` from `@lexical/yjs` (shared-history pattern is documented atop this, not a separate first-party plugin) | core; CRDT collab is native, not a plugin (see [ADR 0001](adr/0001-adopt-loro-over-yjs.md)) | ✅ |
 | `CommentPlugin` (playground) | core, anchored by `comment-anchor` mark; sibling LoroDoc container holds thread payloads | ✅ |
 | `TableOfContentsPlugin` | derived from SQLite mirror outline (see [`wasm-strategy.md` §2.2](wasm-strategy.md)) | ✅ |
-| `MarkdownTransformers` | plugin (`@weaver/plugins-markdown`) covers import / export | 🔁 |
+| `@lexical/markdown` (exposes transformers + `MarkdownShortcutPlugin`) | plugin (`@weaver/plugins-markdown`) covers transformers, import, and export | 🔁 |
 | `HTML` import / export | plugin (`@weaver/plugins-html`) | 🔁 |
 | `LayoutPlugin` (multi-column) | — | ⏳ |
 | `PollPlugin` / `StickyPlugin` / `EquationPlugin` (playground demos) | — | ⏳ |
@@ -137,11 +156,11 @@ Lexical ships ~30 packages under `@lexical/*`. weaver bundles equivalent behavio
 
 These are differences from Lexical we deliberately preserve, not gaps to close:
 
-- **CRDT as the source of truth** ([ADR 0001](adr/0001-adopt-loro-over-yjs.md)). Lexical holds an `EditorState` tree; collab is via `@lexical/yjs` syncing two states. weaver has one state.
-- **No React-managed editing surface** ([`architecture.md` §1](architecture.md#1-system-overview)). Lexical's surface is React. weaver's surface is imperative DOM patched from Loro diffs.
+- **CRDT as the source of truth** (D1, [ADR 0001](adr/0001-adopt-loro-over-yjs.md)). Lexical holds an `EditorState` tree; collab is via `@lexical/yjs` syncing two states. weaver has one state.
+- **No React-managed editing surface** ([`architecture.md` §1](architecture.md#1-system-overview)). Lexical's core (`lexical`) is framework-agnostic; its *common* binding is `@lexical/react` which puts the editing surface under React. weaver's surface is imperative DOM patched from Loro diffs.
 - **Block-as-unit** ([ADR 0002](adr/0002-notion-style-block-model.md)). Lexical mixes block / inline / mark in one node type system. weaver makes the block a first-class primitive with separate inline/mark surfaces.
 - **AI agents as peers, not API calls** ([`ai-agent.md`](ai-agent.md)). Lexical has no first-class agent model.
-- **Effect-TS plugin contract**. Lexical plugins are React components + command listeners. weaver plugins are Effect Layers.
+- **Effect-TS plugin contract**. Lexical plugin authoring is a set of editor registrations (`editor.registerCommand`, `editor.registerNodeTransform`, `editor.registerUpdateListener`) — the React layer is one binding atop those primitives. weaver plugins are Effect `Layer`s with typed error channels and exhaustive `Match.tag` pattern matching; the contract is structurally different, not just "React vs not-React."
 
 Closing these would be re-becoming Lexical. They are not in the parity rubric.
 
@@ -152,20 +171,24 @@ The Lexical-parity catalog is **delivered** when an independent grader, seeing o
 ### Completeness
 - Every row marked **✅ In v1** has a corresponding implementation that is reachable from a public export of `@weaver/core` or `@weaver/react`.
 - Every row marked **🔁 In v1 via plugin** has a corresponding implementation in a published `@weaver/plugins-*` package.
-- Every row marked **⏳** has a corresponding open issue or RFC explaining the deferral; nothing in this column is implemented in v1.
-- The total count of ✅ + 🔁 rows in §1 (Node / block kinds) is **≥ 18**.
+- Every row marked **⏳** links to an open issue or RFC URL in the row's "Notes" column explaining the deferral; nothing in this column is implemented in v1; the grader can click each URL and reach a non-404 page.
+- No ⏳ row's named primitive is reachable from the public exports of `@weaver/core` / `@weaver/react` / the published `@weaver/plugins-*` set. (Grader test: `grep` the public exports; no match.)
+- The total count of ✅ + 🔁 rows in §1 (Node / block kinds) is **≥ 22**.
 - The total count of ✅ + 🔁 rows in §2 (Marks) is **≥ 7**.
-- The total count of ✅ + 🔁 rows in §3 (Commands) is **≥ 12**.
-- The total count of ✅ + 🔁 rows in §4 (Plugins) is **≥ 14**.
+- The total count of ✅ + 🔁 rows in §3 (Commands) is **≥ 18**.
+- The total count of ✅ + 🔁 rows in §4 (Plugins) is **≥ 20**.
+- The total count of ✅ + 🔁 rows in §5 (Hooks) is **≥ 5**.
+- The total count of ✅ + 🔁 rows in §6 (Serialization) is **≥ 4**.
 
 ### Fidelity
-- For each ✅ block kind, applying the equivalent Lexical demo content (HTML or Markdown) via `@weaver/plugins-html` / `@weaver/plugins-markdown` produces a document whose visible rendering matches the Lexical playground's rendering of the same input within: same block structure, same marks, same nesting depth, same anchor links. (Grader test: render side-by-side; visually diff.)
-- For each ✅ command, dispatching the documented payload from the API produces the same observable state change as Lexical's equivalent command on the same input doc.
-- Undo / redo, when invoked after a sequence of N commands, returns the document to a state byte-identical to the snapshot taken before the sequence (within Loro's snapshot equality).
+- For each ✅ block kind, applying the equivalent Lexical demo content (HTML or Markdown) via `@weaver/plugins-html` / `@weaver/plugins-markdown` produces a document whose serialized block tree (kind, depth, mark set per text run, link href, image src) equals Lexical's post-import tree under the documented normalizer in `@weaver/plugins-html/normalizer.ts` (tolerance: whitespace runs collapsed; element IDs ignored).
+- For each ✅ command, dispatching the documented payload produces a post-command serialized block tree equal to Lexical's post-command tree, under the same normalizer, on the same input fixture.
+- Undo / redo, after a sequence of N commands, returns `Loro.toJSON(doc)` to a value that `deep-equals` the snapshot taken before the sequence began (excluding container internal IDs).
 
 ### Traceability
-- Each row in this catalog links to one of: the relevant code file, the relevant ADR, or an open issue.
-- The catalog file is updated in the same PR as any change to the v1 surface; the CI lint warns when a row's referenced file does not exist.
+- Each row in this catalog links to one of: the relevant code file, the relevant ADR, or an open issue (markdown URL).
+- A lint script (`scripts/lint-parity-refs.ts`) exists and exits non-zero when a row's referenced file/URL does not resolve.
+- The CI workflow `.github/workflows/ci.yml` invokes that lint script on any PR touching `specs/lexical-parity.md` (verifiable by an evaluator: induce a broken reference in a test PR; CI fails).
 
 ### Output quality
 - The catalog is a single file (`specs/lexical-parity.md`) with §1–§7 in the documented order.
@@ -177,6 +200,8 @@ The Lexical-parity catalog is **delivered** when an independent grader, seeing o
 
 ## See also
 
+- [`prd.md`](prd.md) — D1 (LoroDoc as single source of truth) and §5 non-goal "100% feature surface of Lexical day one" are the bedrock for this catalog.
+- [`architecture.md`](architecture.md) — where the command bus, plugin contract, and reactivity model are defined.
 - [`benchmarks.md`](benchmarks.md) — the perf bar this parity must clear.
 - [`playground.md`](playground.md) — the demo surface that exercises the parity items.
 - [`comparison.md`](comparison.md) — the narrative comparison (this file is the operational catalog).
