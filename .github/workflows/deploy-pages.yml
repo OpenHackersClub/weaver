@@ -3,6 +3,8 @@ name: Deploy docs (Cloudflare Pages)
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       branch:
@@ -11,20 +13,23 @@ on:
         default: main
 
 concurrency:
-  group: deploy-pages
-  cancel-in-progress: false
+  group: deploy-pages-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   deploy:
     name: Build & deploy
+    # Skip PRs from forks — secrets aren't available there, so the deploy would fail anyway.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
-      name: production
-      url: https://weaver.openhackers.club
+      name: ${{ github.event_name == 'pull_request' && format('preview-pr-{0}', github.event.pull_request.number) || 'production' }}
+      url: ${{ steps.deploy.outputs.deployment-url || 'https://weaver.openhackers.club' }}
     permissions:
       contents: read
       deployments: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -45,6 +50,7 @@ jobs:
         run: pnpm --filter @weaver/docs build
 
       - name: Deploy to Cloudflare Pages
+        id: deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
