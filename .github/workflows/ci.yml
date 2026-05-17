@@ -15,7 +15,7 @@ jobs:
   build:
     name: Build & typecheck
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -38,7 +38,22 @@ jobs:
       - name: Build docs site
         run: pnpm --filter @weaver/docs build
 
-      - name: Upload build artifact
+      - name: Typecheck @weaver/core
+        run: pnpm --filter @weaver/core typecheck
+
+      - name: Typecheck @weaver/dom
+        run: pnpm --filter @weaver/dom typecheck
+
+      - name: Typecheck @weaver/react
+        run: pnpm --filter @weaver/react typecheck
+
+      - name: Unit tests — @weaver/core
+        run: pnpm --filter @weaver/core test
+
+      - name: Build playground SPA
+        run: pnpm --filter @weaver/playground build
+
+      - name: Upload docs build artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
@@ -46,3 +61,59 @@ jobs:
           path: apps/docs/dist
           retention-days: 7
           if-no-files-found: error
+
+      - name: Upload playground build artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playground-dist
+          path: apps/playground/dist
+          retention-days: 7
+          if-no-files-found: error
+
+  acceptance:
+    name: Playwright acceptance (@weaver/playground)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @weaver/playground exec playwright install --with-deps chromium
+
+      - name: Build playground SPA
+        run: pnpm --filter @weaver/playground build
+
+      - name: Run Playwright acceptance suite
+        run: pnpm --filter @weaver/playground test
+        env:
+          CI: "1"
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/playground/playwright-report
+          retention-days: 7

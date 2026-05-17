@@ -1,0 +1,58 @@
+name: Deploy playground (Cloudflare Pages)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to deploy
+        required: false
+        default: main
+
+concurrency:
+  group: deploy-playground-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  deploy:
+    name: Build & deploy
+    # Skip PRs from forks — secrets aren't available there, so the deploy would fail anyway.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: ${{ github.event_name == 'pull_request' && format('playground-preview-pr-{0}', github.event.pull_request.number) || 'playground-production' }}
+      url: ${{ steps.deploy.outputs.deployment-url || 'https://weaver-playground.openhackers.club' }}
+    permissions:
+      contents: read
+      deployments: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+          run_install: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build playground SPA
+        run: pnpm --filter @weaver/playground build
+
+      - name: Deploy to Cloudflare Pages
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/playground/dist --project-name=weaver-playground --branch=${{ github.head_ref || github.ref_name }} --commit-dirty=true

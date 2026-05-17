@@ -1,0 +1,287 @@
+:root {
+  --bg: #ffffff;
+  --fg: #18181b;
+  --muted: #71717a;
+  --accent: #4f46e5;
+  --border: #e4e4e7;
+  --panel: #fafafa;
+  --code: #0f172a;
+  --code-fg: #e2e8f0;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --fg: #fafafa;
+  --muted: #a1a1aa;
+  --accent: #818cf8;
+  --border: #27272a;
+  --panel: #18181b;
+  --code: #18181b;
+  --code-fg: #e4e4e7;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+a {
+  color: var(--accent);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.app-header {
+  padding: 20px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.app-header h1 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.app-header .tagline {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.app-body {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 0;
+  flex: 1;
+  min-height: 0;
+}
+
+.app-body:has(.debug-stack) {
+  grid-template-columns: 220px minmax(0, 1fr) 360px;
+}
+
+.sidebar {
+  padding: 20px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  overflow-y: auto;
+}
+
+.sidebar h2 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 16px 0 8px;
+}
+
+.sidebar h2:first-child {
+  margin-top: 0;
+}
+
+.example-list,
+.debug-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.example-list li {
+  margin-bottom: 12px;
+}
+
+.example-list p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.example-list button,
+.sidebar > section > button {
+  width: 100%;
+  text-align: left;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.example-list button[data-active="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.debug-list label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.surface {
+  padding: 32px 48px;
+  overflow-y: auto;
+  background: var(--bg);
+}
+
+.editor {
+  max-width: 720px;
+  margin: 0 auto;
+  outline: none;
+  min-height: 320px;
+}
+
+.editor:focus-within {
+  /* no chrome — the blocks themselves carry the focus ring as needed */
+}
+
+.weaver-block {
+  margin: 6px 0;
+}
+
+.weaver-paragraph {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.weaver-heading {
+  font-weight: 700;
+  margin-top: 28px;
+}
+
+h1.weaver-heading {
+  font-size: 28px;
+}
+
+h2.weaver-heading {
+  font-size: 22px;
+}
+
+h3.weaver-heading {
+  font-size: 18px;
+}
+
+h4.weaver-heading,
+h5.weaver-heading,
+h6.weaver-heading {
+  font-size: 16px;
+}
+
+.weaver-quote {
+  border-left: 3px solid var(--accent);
+  padding-left: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.weaver-host strong,
+.weaver-host b {
+  font-weight: 700;
+}
+
+.weaver-host em,
+.weaver-host i {
+  font-style: italic;
+}
+
+.weaver-host u {
+  text-decoration: underline;
+}
+
+.debug-stack {
+  border-left: 1px solid var(--border);
+  background: var(--panel);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.debug-panel {
+  border-bottom: 1px solid var(--border);
+  padding: 12px;
+}
+
+.debug-panel header {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.debug-panel pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  font-size: 11px;
+  background: var(--code);
+  color: var(--code-fg);
+  padding: 8px;
+  border-radius: 6px;
+  max-height: 280px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.debug-panel ol {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.debug-panel ol li {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  gap: 8px 12px;
+  margin-bottom: 4px;
+}
+
+.debug-panel ol li span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-footer {
+  padding: 12px 28px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}
