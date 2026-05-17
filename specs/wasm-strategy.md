@@ -75,7 +75,7 @@ Biscuit / macaroon impls; WebCrypto suffices but WASM impls have cleaner caveat 
 ## 3. What WASM does NOT help with
 
 - **DOM patching / contenteditable** — DOM is JS-bound; WASM can't touch it. The browser will not get faster.
-- **React rendering** — JS engine territory. Use Valtio + microtask coalescing to fine-grain subscribe.
+- **React rendering** — JS engine territory. Use Effect-TS `SubscriptionRef` cells (per [ADR 0007](adr/0007-ui-state-effect-over-valtio.md)) with `Stream.changes` + microtask coalescing for fine-grained subscribe.
 - **Selection mapping** — round-trip overhead > Loro gains for individual `Cursor` ↔ DOM Selection calls. Keep this in JS.
 
 ## See also

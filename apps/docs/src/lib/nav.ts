@@ -39,7 +39,7 @@ export const nav: NavSection[] = [
       {
         slug: "block-model",
         label: "Block Model",
-        blurb: "Block data structure, Loro mapping, Valtio's role, the layering rule.",
+        blurb: "Block data structure, Loro mapping, Effect-TS SubscriptionRef stores, the layering rule.",
       },
       {
         slug: "hard-problems",
@@ -101,6 +101,10 @@ export const nav: NavSection[] = [
       {
         slug: "adr/0006-ai-agent-threat-model",
         label: "ADR 0006 — AI agent threat model",
+      },
+      {
+        slug: "adr/0007-ui-state-effect-over-valtio",
+        label: "ADR 0007 — UI state: Effect-TS over Valtio",
       },
     ],
   },
