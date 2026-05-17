@@ -1,5 +1,11 @@
 # weaver
 
+<p align="center">
+  <img src="./assets/weaver.png" alt="Weaver songbirds weaving a hanging nest from grass and vegetation" width="640">
+</p>
+
+> Weavers are small songbirds famous for weaving intricate, hanging nests out of vegetation.
+
 A TypeScript rich-text editor with **LoroDoc as the single source of truth**, designed for AI agents as a first-class collaborative peer.
 
 **Docs site** — <https://weaver-docs.pages.dev> (default CF Pages subdomain; `weaver.openhackers.club` once DNS is in place).
