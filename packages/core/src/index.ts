@@ -13,6 +13,8 @@ export {
   BulletAttrs,
   NumberedAttrs,
   TodoAttrs,
+  CodeAttrs,
+  DividerAttrs,
   blockKindHasInline,
   defaultAttrsFor,
 } from "./block.js";
@@ -26,5 +28,8 @@ export {
   type EditorOptions,
   type EditorOrigin,
   type EditorCommands,
+  type HistoryCommands,
+  type SelectionCommands,
+  type SelectionRange,
   type MarkKind,
 } from "./editor.js";

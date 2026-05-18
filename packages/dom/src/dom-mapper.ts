@@ -1,4 +1,4 @@
-import type { BlockId, BlockKind, Editor } from "@weaver/core";
+import type { Block, BlockId, BlockKind, Editor } from "@weaver/core";
 import { getBlock, getChildren, rootId } from "@weaver/core";
 
 const BLOCK_ATTR = "data-block-id";
@@ -15,6 +15,10 @@ export const tagFor = (kind: BlockKind, level?: number): string => {
     case "numbered-list-item":
     case "to-do":
       return "li";
+    case "code":
+      return "pre";
+    case "divider":
+      return "hr";
     default:
       return "p";
   }
@@ -22,7 +26,12 @@ export const tagFor = (kind: BlockKind, level?: number): string => {
 
 export const blockClassFor = (kind: BlockKind): string => `weaver-block weaver-${kind}`;
 
-const NBSP = " ";
+// Empty inline blocks need a node so the caret has somewhere to land. A
+// zero-width space keeps the block focusable without contributing visible
+// text — and acceptance tests strip U+200B when reading block text.
+const EMPTY_PLACEHOLDER = "​";
+
+const TODO_CONTENT_CLASS = "weaver-todo-content";
 
 interface DeltaItem {
   readonly insert?: string;
@@ -120,8 +129,44 @@ const renderDeltaInto = (
     totalLen += item.insert.length;
   }
   if (totalLen === 0) {
-    el.appendChild(doc.createTextNode(NBSP));
+    el.appendChild(doc.createTextNode(EMPTY_PLACEHOLDER));
   }
+};
+
+const syncTodoCheckbox = (check: HTMLElement, checked: boolean): void => {
+  check.setAttribute("aria-checked", String(checked));
+  check.classList.toggle("weaver-todo-checked", checked);
+};
+
+/**
+ * Render inline content into a block element. A `to-do` block gets a
+ * non-editable checkbox affordance plus a dedicated content span, so the
+ * checkbox survives per-keystroke delta re-renders; every other inline kind
+ * renders its delta straight into the block element.
+ */
+const renderInline = (
+  el: HTMLElement,
+  block: Block,
+  delta: ReadonlyArray<DeltaItem>,
+): void => {
+  if (block.kind !== "to-do") {
+    renderDeltaInto(el, delta);
+    return;
+  }
+  const doc = el.ownerDocument;
+  let check = el.querySelector("[data-todo-check]") as HTMLElement | null;
+  let content = el.querySelector(`.${TODO_CONTENT_CLASS}`) as HTMLElement | null;
+  if (!check || !content) {
+    check = doc.createElement("span");
+    check.setAttribute("data-todo-check", "");
+    check.setAttribute("role", "checkbox");
+    check.setAttribute("contenteditable", "false");
+    content = doc.createElement("span");
+    content.className = TODO_CONTENT_CLASS;
+    el.replaceChildren(check, content);
+  }
+  syncTodoCheckbox(check, (block.attrs as { checked?: boolean }).checked === true);
+  renderDeltaInto(content, delta);
 };
 
 export const renderBlockElement = (editor: Editor, blockId: BlockId): HTMLElement => {
@@ -136,7 +181,13 @@ export const renderBlockElement = (editor: Editor, blockId: BlockId): HTMLElemen
     el.setAttribute(LEVEL_ATTR, String(level));
   }
   el.className = blockClassFor(block.kind);
-  renderDeltaInto(el, editor.commands.text.toDelta(blockId) as ReadonlyArray<DeltaItem>);
+  if (block.hasInline) {
+    renderInline(
+      el,
+      block,
+      editor.commands.text.toDelta(blockId) as ReadonlyArray<DeltaItem>,
+    );
+  }
   return el;
 };
 
@@ -165,7 +216,15 @@ const updateBlockElement = (
   } else if (el.hasAttribute(LEVEL_ATTR)) {
     el.removeAttribute(LEVEL_ATTR);
   }
-  renderDeltaInto(el, editor.commands.text.toDelta(blockId) as ReadonlyArray<DeltaItem>);
+  if (block.hasInline) {
+    renderInline(
+      el,
+      block,
+      editor.commands.text.toDelta(blockId) as ReadonlyArray<DeltaItem>,
+    );
+  } else if (el.childNodes.length > 0) {
+    el.replaceChildren();
+  }
   return el;
 };
 
@@ -217,4 +276,4 @@ export const blockElementContaining = (
 
 export const blockIdOf = (el: HTMLElement): BlockId | null => el.getAttribute(BLOCK_ATTR);
 
-export const TEXT_PLACEHOLDER = NBSP;
+export const TEXT_PLACEHOLDER = EMPTY_PLACEHOLDER;
