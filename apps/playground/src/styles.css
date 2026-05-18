@@ -279,6 +279,88 @@ h6.weaver-heading {
   text-overflow: ellipsis;
 }
 
+.fps-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+}
+
+.fps-now {
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.fps-now[data-tier="good"] {
+  color: #22c55e;
+}
+
+.fps-now[data-tier="warn"] {
+  color: #f59e0b;
+}
+
+.fps-now[data-tier="bad"] {
+  color: #ef4444;
+}
+
+.fps-idle {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.fps-unit {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.fps-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.fps-stat {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.fps-stat + .fps-stat {
+  margin-left: 0;
+}
+
+.fps-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 40px;
+  margin-top: 8px;
+  padding: 4px;
+  background: var(--code);
+  border-radius: 6px;
+}
+
+.fps-bar {
+  flex: 1 1 0;
+  min-width: 2px;
+  border-radius: 1px;
+  background: #22c55e;
+}
+
+.fps-bar[data-tier="warn"] {
+  background: #f59e0b;
+}
+
+.fps-bar[data-tier="bad"] {
+  background: #ef4444;
+}
+
 .app-footer {
   padding: 12px 28px;
   border-top: 1px solid var(--border);

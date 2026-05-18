@@ -1,6 +1,6 @@
 import { EXAMPLES, type ExampleId } from "./examples.js";
 
-export type DebugPanelId = "tree" | "ops" | "vv";
+export type DebugPanelId = "tree" | "ops" | "vv" | "fps";
 
 export interface UrlState {
   readonly example: ExampleId;
@@ -8,7 +8,7 @@ export interface UrlState {
   readonly theme: "light" | "dark";
 }
 
-const ALL_DEBUG: ReadonlySet<DebugPanelId> = new Set(["tree", "ops", "vv"]);
+const ALL_DEBUG: ReadonlySet<DebugPanelId> = new Set(["tree", "ops", "vv", "fps"]);
 const DEFAULT_EXAMPLE: ExampleId = "demo";
 
 export const readUrlState = (search: string): UrlState => {

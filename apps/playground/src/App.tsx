@@ -5,7 +5,7 @@ import { EXAMPLES, seedExample, type ExampleId } from "./examples.js";
 import { readUrlState, writeUrlState, type DebugPanelId } from "./url-state.js";
 import { DebugPanels } from "./debug-panels.js";
 
-const ALL_DEBUG_PANELS: ReadonlyArray<DebugPanelId> = ["tree", "ops", "vv"];
+const ALL_DEBUG_PANELS: ReadonlyArray<DebugPanelId> = ["tree", "ops", "vv", "fps"];
 
 /** Compact recursive view of the block tree — used by acceptance tests to
  *  assert structural nesting (which the flat DOM renderer can't reveal). */
