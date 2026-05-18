@@ -169,7 +169,7 @@ The original framing emphasized "offline-verifiable in the hot path so the DO ca
 
 What remains load-bearing for Biscuit:
 
-- **Attenuation for agent delegation** — the user attenuates their own token offline to issue a scoped grant to an agent. JWT can't do this. This is the primary feature [ADR 0006](./0006-ai-agent-threat-model.md) leans on.
+- **Attenuation for agent delegation** — the user attenuates their own token offline to issue a scoped grant to an agent. JWT can't do this. This is the primary feature [ADR 0005 §"Agent threat surface"](./0005-trust-model.md#agent-threat-surface) leans on.
 - **Attenuation for share-links** — same property, different audience.
 - **Datalog caveats** — still more reviewable than JWT scope strings or Macaroon predicate strings.
 

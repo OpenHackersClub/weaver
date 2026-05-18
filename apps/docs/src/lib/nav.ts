@@ -111,15 +111,11 @@ export const nav: NavSection[] = [
       },
       {
         slug: "adr/0005-trust-model",
-        label: "ADR 0005 — Trust model",
+        label: "ADR 0005 — Trust model & threat surface",
       },
       {
-        slug: "adr/0006-ai-agent-threat-model",
-        label: "ADR 0006 — AI agent threat model",
-      },
-      {
-        slug: "adr/0007-ui-state-effect-over-valtio",
-        label: "ADR 0007 — UI state: Effect-TS over Valtio",
+        slug: "adr/0006-ui-state-effect-over-valtio",
+        label: "ADR 0006 — UI state: Effect-TS over Valtio",
       },
     ],
   },

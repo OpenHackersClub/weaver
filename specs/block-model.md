@@ -1,6 +1,6 @@
 # Block Model — Data Structure, Reactivity, and UI State
 
-> Companion to [`architecture.md` §2 and §3](architecture.md). Where the decision to use a Notion-style block model lives in [ADR 0002](adr/0002-notion-style-block-model.md), this doc fills in the implementation: how a block is stored, how it's mutated, how it reaches the screen, and how ephemeral UI state lives in Effect-TS `SubscriptionRef` stores alongside LoroDoc ([ADR 0007](adr/0007-ui-state-effect-over-valtio.md)).
+> Companion to [`architecture.md` §2 and §3](architecture.md). Where the decision to use a Notion-style block model lives in [ADR 0002](adr/0002-notion-style-block-model.md), this doc fills in the implementation: how a block is stored, how it's mutated, how it reaches the screen, and how ephemeral UI state lives in Effect-TS `SubscriptionRef` stores alongside LoroDoc ([ADR 0006](adr/0006-ui-state-effect-over-valtio.md)).
 
 ## 1. The three layers
 
@@ -37,7 +37,7 @@ flowchart LR
 | **Editor core** | Typed view over LoroDoc | Pure derivation (no own state) | `Block<K>` selectors that decode `LoroTreeNode` + `LoroMap` into validated typed records. Stateless. |
 | **UI (React + Effect)** | Rendering + ephemeral interaction | React hooks for document state; Effect-TS `SubscriptionRef` cells for ephemeral UI state | Toggle open/closed, hover/focus, drag preview, slash-menu state, toolbar open, AI panel state, in-flight selection rectangle. **Nothing that survives reload.** |
 
-The hard rule: **anything that could be persisted, synced, or audited belongs in LoroDoc. Everything else — and only everything else — can live in a `SubscriptionRef`** ([ADR 0007](adr/0007-ui-state-effect-over-valtio.md)).
+The hard rule: **anything that could be persisted, synced, or audited belongs in LoroDoc. Everything else — and only everything else — can live in a `SubscriptionRef`** ([ADR 0006](adr/0006-ui-state-effect-over-valtio.md)).
 
 ## 2. The block, in detail
 
@@ -198,7 +198,7 @@ The editor surface (contenteditable area) is **not React-managed** — it's impe
 
 ## 6. Ephemeral UI state — Effect-TS `SubscriptionRef`
 
-Per [ADR 0007](adr/0007-ui-state-effect-over-valtio.md), all ephemeral UI state lives in Effect-TS — `SubscriptionRef<T>` for observable cells, `PubSub<E>` for event broadcasts, `Layer` for store composition and injection, `Match.tag` (with `Schema.TaggedStruct` / `Schema.Union`) for state machines. It is the only place such state lives.
+Per [ADR 0006](adr/0006-ui-state-effect-over-valtio.md), all ephemeral UI state lives in Effect-TS — `SubscriptionRef<T>` for observable cells, `PubSub<E>` for event broadcasts, `Layer` for store composition and injection, `Match.tag` (with `Schema.TaggedStruct` / `Schema.Union`) for state machines. It is the only place such state lives.
 
 "Ephemeral UI state" means state that is reset on reload, never travels over the network, and is purely a function of how this one viewer is currently interacting with the UI.
 
@@ -415,14 +415,14 @@ The agent peer does **not** touch the UI store. The UI store is a viewer-only co
 
 ## 8. Anti-patterns to reject
 
-- **Mirroring LoroDoc into a `SubscriptionRef`.** "Let me keep an Effect store in sync with the block tree for easier React access" — no. Use the typed selectors and hooks; LoroDoc already supports narrow subscriptions. See [ADR 0007 §"What this changes"](adr/0007-ui-state-effect-over-valtio.md) for the full argument.
+- **Mirroring LoroDoc into a `SubscriptionRef`.** "Let me keep an Effect store in sync with the block tree for easier React access" — no. Use the typed selectors and hooks; LoroDoc already supports narrow subscriptions. See [ADR 0006 §"What this changes"](adr/0006-ui-state-effect-over-valtio.md) for the full argument.
 - **Putting comment bodies / inline text in the UI store.** Comment bodies are document data; they belong in LoroDoc. *Local draft text* in the comment composer (not yet submitted) can live in the UI store.
 - **Holding a mutable `Block` value and editing it.** `Block<K>` is a read-only snapshot. Mutations go through `block.command(...)`.
 - **Using `useState` for cross-component editor state.** Component-local `useState` is fine for genuinely local UI concerns. If two components need to read or write it, hoist it to a `SubscriptionRef` on `EditorUiStore`, not React Context.
 - **Subscribing to all of LoroDoc.** Use the narrow `useBlock(id)` / `useChildren(id)` hooks.
 - **Hand-rolling Loro container access in components.** Components consume `Block<K>` and `LoroText` references through the hook API; they don't call `doc.getTree("content")` directly.
 - **Untagged UI state.** A new menu/panel/modal starts as a `Schema.Union` tagged state, not as accreting boolean flags on a record. Future contributors should be able to add a case and have `Match.exhaustive` flag every site that hasn't handled it.
-- **Reaching for Valtio / Zustand / Jotai.** None of those are in the stack — see [ADR 0007](adr/0007-ui-state-effect-over-valtio.md). If you need cross-component ephemeral state, use Effect.
+- **Reaching for Valtio / Zustand / Jotai.** None of those are in the stack — see [ADR 0006](adr/0006-ui-state-effect-over-valtio.md). If you need cross-component ephemeral state, use Effect.
 
 ## See also
 
@@ -430,6 +430,6 @@ The agent peer does **not** touch the UI store. The UI store is a viewer-only co
 - [`architecture.md` §3 (reactivity & state)](architecture.md#3-reactivity--state) — the layering table.
 - [ADR 0002 — Notion-style block model](adr/0002-notion-style-block-model.md) — the decision and scope rationale.
 - [ADR 0003 — Concurrent semantics](adr/0003-concurrent-semantics-no-global-rw-aw.md) — per-block merge rules.
-- [ADR 0007 — UI state store: Effect-TS over Valtio](adr/0007-ui-state-effect-over-valtio.md) — why ephemeral UI state lives in `SubscriptionRef`.
+- [ADR 0006 — UI state store: Effect-TS over Valtio](adr/0006-ui-state-effect-over-valtio.md) — why ephemeral UI state lives in `SubscriptionRef`.
 - [`ai-agent.md`](ai-agent.md) — how the agent peer reads and writes blocks.
 - [`access-control.md` §5](access-control.md) — how the per-block `subdoc` tag drives tier routing.
