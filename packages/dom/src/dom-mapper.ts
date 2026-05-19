@@ -38,7 +38,14 @@ interface DeltaItem {
   readonly attributes?: Record<string, unknown>;
 }
 
-const wrapWithMarks = (
+/**
+ * Wrap a plain-text run in inline mark elements, innermost-first. The
+ * `agent-pending` mark (see `specs/ai-agent.md` §5 — the marker pattern) is
+ * the outermost layer: in-progress agent generation renders as
+ * `<span class="weaver-agent-pending" data-agent="<agentId>">`. Styling is
+ * the playground app's job — this layer only carries the hook attributes.
+ */
+export const wrapWithMarks = (
   doc: Document,
   text: string,
   attrs: Record<string, unknown> | undefined,
@@ -80,6 +87,13 @@ const wrapWithMarks = (
     const m = doc.createElement("mark");
     m.appendChild(node);
     node = m;
+  }
+  if (attrs["agent-pending"]) {
+    const span = doc.createElement("span");
+    span.className = "weaver-agent-pending";
+    span.setAttribute("data-agent", String(attrs["agent-pending"]));
+    span.appendChild(node);
+    node = span;
   }
   return node;
 };

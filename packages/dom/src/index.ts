@@ -16,3 +16,8 @@ export {
   writeDomSelection,
   placeCaret,
 } from "./selection-mapper.js";
+export {
+  type PresenceCursor,
+  type PresenceOverlay,
+  attachPresenceOverlay,
+} from "./presence-overlay.js";
