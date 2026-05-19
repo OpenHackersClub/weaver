@@ -12,26 +12,42 @@ export interface OpEntry {
   readonly at: number;
 }
 
-export const useOpLog = (editor: Editor, limit = 50): ReadonlyArray<OpEntry> => {
+/**
+ * Recent Loro ops across the visitor's editor and every agent peer editor.
+ *
+ * Only `by === "local"` batches are recorded — each op then appears exactly
+ * once, tagged with the originating peer's `origin` ("user", "agent-1", …).
+ * (A commit's `origin` is event-local and is not carried across `import`, so
+ * subscribing per-peer is how the op log recovers `origin: agent-N`.)
+ */
+export const useOpLog = (
+  editors: ReadonlyArray<Editor>,
+  limit = 60,
+): ReadonlyArray<OpEntry> => {
   const [entries, setEntries] = useState<ReadonlyArray<OpEntry>>([]);
   useEffect(() => {
     let counter = 0;
-    const unsub = editor.doc.subscribe((batch) => {
-      counter += 1;
-      const first = batch.events[0];
-      const target = first ? String(first.target) : "";
-      const entry: OpEntry = {
-        id: counter,
-        origin: batch.origin ?? "(none)",
-        by: batch.by,
-        events: batch.events.length,
-        target,
-        at: Date.now(),
-      };
-      setEntries((prev) => [entry, ...prev].slice(0, limit));
-    });
-    return () => unsub();
-  }, [editor, limit]);
+    const unsubs = editors.map((editor) =>
+      editor.doc.subscribe((batch) => {
+        if (batch.by !== "local") return;
+        counter += 1;
+        const first = batch.events[0];
+        const target = first ? String(first.target) : "";
+        const entry: OpEntry = {
+          id: counter,
+          origin: batch.origin ?? "(none)",
+          by: batch.by,
+          events: batch.events.length,
+          target,
+          at: Date.now(),
+        };
+        setEntries((prev) => [entry, ...prev].slice(0, limit));
+      }),
+    );
+    return () => {
+      for (const unsub of unsubs) unsub();
+    };
+  }, [editors, limit]);
   return entries;
 };
 
@@ -45,8 +61,12 @@ export const BlockTreePanel = ({ editor }: { editor: Editor }) => {
   );
 };
 
-export const OpLogPanel = ({ editor }: { editor: Editor }) => {
-  const ops = useOpLog(editor);
+export const OpLogPanel = ({
+  editors,
+}: {
+  editors: ReadonlyArray<Editor>;
+}) => {
+  const ops = useOpLog(editors);
   return (
     <div className="debug-panel" data-weaver-debug-panel="ops">
       <header>Op log</header>
@@ -79,16 +99,19 @@ export const VersionVectorPanel = ({ editor }: { editor: Editor }) => {
 
 export const DebugPanels = ({
   editor,
+  opLogEditors,
   enabled,
 }: {
   editor: Editor;
+  /** The visitor's editor plus every agent peer editor — for the op log. */
+  opLogEditors: ReadonlyArray<Editor>;
   enabled: ReadonlySet<DebugPanelId>;
 }) => {
   if (enabled.size === 0) return null;
   return (
     <aside className="debug-stack">
       {enabled.has("tree") && <BlockTreePanel editor={editor} />}
-      {enabled.has("ops") && <OpLogPanel editor={editor} />}
+      {enabled.has("ops") && <OpLogPanel editors={opLogEditors} />}
       {enabled.has("vv") && <VersionVectorPanel editor={editor} />}
     </aside>
   );

@@ -5,7 +5,7 @@ import {
   rootId,
 } from "@weaver/core";
 
-export type ExampleId = "empty" | "demo" | "multi";
+export type ExampleId = "empty" | "demo" | "multi" | "agent";
 
 export interface ExampleDef {
   readonly id: ExampleId;
@@ -28,6 +28,12 @@ export const EXAMPLES: ReadonlyArray<ExampleDef> = [
     id: "multi",
     label: "Multi-paragraph",
     description: "Several paragraphs for multi-block editing practice.",
+  },
+  {
+    id: "agent",
+    label: "Agent collab",
+    description:
+      "Mock AI agents join as CRDT peers — pre-enabled, streaming scripted edits.",
   },
 ];
 
@@ -125,6 +131,24 @@ export const seedExample = (editor: Editor, id: ExampleId): void => {
       for (let i = 2; i <= 6; i++) {
         seedBlock(editor, i - 1, "paragraph", {}, `Paragraph ${i}.`);
       }
+      return;
+    }
+    case "agent": {
+      replaceFirstBlock(editor, "heading", { level: 1 }, "Agent collaboration demo");
+      seedBlock(
+        editor,
+        1,
+        "paragraph",
+        {},
+        "Mock AI agents join this document as CRDT peers — each is a separate LoroDoc whose ops merge in-process. Turn them on in the sidebar.",
+      );
+      seedBlock(
+        editor,
+        2,
+        "paragraph",
+        {},
+        "Keep typing here while an agent streams below — Loro merges the concurrent edits and your caret never jumps.",
+      );
       return;
     }
   }
