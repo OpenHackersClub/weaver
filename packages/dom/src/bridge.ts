@@ -38,6 +38,13 @@ const richifyHost = (host: HTMLElement, opts: BridgeOptions): void => {
   host.setAttribute("spellcheck", "true");
   host.setAttribute("role", "textbox");
   host.setAttribute("aria-multiline", "true");
+  // Render LoroDoc text verbatim. The browser default `white-space: normal`
+  // collapses runs of spaces and trims trailing spaces at a line's end, so a
+  // user typing two spaces — or a space ending a sentence — would see the
+  // editor silently swallow them even though LoroDoc stored them faithfully.
+  // `pre-wrap` preserves every space and still wraps long lines; it's a
+  // functional requirement of the editing surface, hence set here, not in CSS.
+  host.style.whiteSpace = "pre-wrap";
   host.classList.add("weaver-host");
   for (const c of opts.classList ?? []) host.classList.add(c);
 };

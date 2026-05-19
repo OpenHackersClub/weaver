@@ -227,3 +227,92 @@ test.describe("caret stays at the end of typed text", () => {
     expect(text).toBe("abc");
   });
 });
+
+test.describe("whitespace is preserved — spaces are not collapsed", () => {
+  // Reported on the deployed playground: a space at the end of a sentence,
+  // or two spaces between words, appeared to do nothing. The LoroDoc model
+  // held the spaces correctly — the bug was the editing surface rendering
+  // with the browser default `white-space: normal`, which collapses runs of
+  // spaces and trims trailing spaces. `richifyHost` now sets `white-space:
+  // pre-wrap` on every editor host.
+  //
+  // `textContent` carries the characters regardless of how they render, so
+  // these guards also measure the *rendered* width of the span of spaces:
+  // preserved they are tens of px wide, collapsed they shrink to one space
+  // (~4px) and trailing ones trim to ~0px. 20px sits well inside that gap.
+  const SPACES = 10;
+  const MIN_RENDERED_WIDTH = 20;
+
+  test("consecutive spaces between words are rendered", async ({ page }) => {
+    await page.goto(EMPTY_DOC_URL);
+    await focusEditor(page);
+    const spacesWidth = await page.evaluate((n) => {
+      const root = document.querySelector("[data-weaver-root]") as HTMLElement;
+      root.focus();
+      const dispatch = (data: string) =>
+        root.dispatchEvent(
+          new InputEvent("beforeinput", {
+            inputType: "insertText",
+            data,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      dispatch("a");
+      for (let i = 0; i < n; i++) dispatch(" ");
+      dispatch("b");
+      const block = root.querySelector("[data-block-id]") as HTMLElement;
+      const textNode = document
+        .createTreeWalker(block, NodeFilter.SHOW_TEXT)
+        .nextNode() as Text;
+      const range = document.createRange();
+      range.setStart(textNode, 1); // just after "a"
+      range.setEnd(textNode, 1 + n); // just before "b"
+      return range.getBoundingClientRect().width;
+    }, SPACES);
+
+    const text = await page
+      .locator('[data-weaver-root] [data-block-id]')
+      .first()
+      .textContent();
+    // The model kept every character...
+    expect(text).toBe(`a${" ".repeat(SPACES)}b`);
+    // ...and the editor rendered them rather than collapsing to one space.
+    expect(spacesWidth).toBeGreaterThan(MIN_RENDERED_WIDTH);
+  });
+
+  test("a space at the end of a sentence is rendered", async ({ page }) => {
+    await page.goto(EMPTY_DOC_URL);
+    await focusEditor(page);
+    const spacesWidth = await page.evaluate((n) => {
+      const root = document.querySelector("[data-weaver-root]") as HTMLElement;
+      root.focus();
+      const dispatch = (data: string) =>
+        root.dispatchEvent(
+          new InputEvent("beforeinput", {
+            inputType: "insertText",
+            data,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      for (const ch of "word") dispatch(ch);
+      for (let i = 0; i < n; i++) dispatch(" ");
+      const block = root.querySelector("[data-block-id]") as HTMLElement;
+      const textNode = document
+        .createTreeWalker(block, NodeFilter.SHOW_TEXT)
+        .nextNode() as Text;
+      const range = document.createRange();
+      range.setStart(textNode, 4); // just after "word"
+      range.setEnd(textNode, 4 + n); // through the trailing spaces
+      return range.getBoundingClientRect().width;
+    }, SPACES);
+
+    const text = await page
+      .locator('[data-weaver-root] [data-block-id]')
+      .first()
+      .textContent();
+    expect(text).toBe(`word${" ".repeat(SPACES)}`);
+    expect(spacesWidth).toBeGreaterThan(MIN_RENDERED_WIDTH);
+  });
+});
