@@ -282,6 +282,23 @@ const validateMarkValue = (mark: MarkKind, value: unknown): void => {
   }
 };
 
+/**
+ * Order a selection's two endpoints into `[start, end]` document order.
+ * `ai`/`fi` are the anchor/focus block indices in document order; when both
+ * endpoints sit in the *same* block the offsets break the tie — without that,
+ * a backward within-block selection (anchor offset > focus offset) yields a
+ * negative-length range and silently deletes nothing.
+ */
+const orderEndpoints = (
+  sel: SelectionRange,
+  ai: number,
+  fi: number,
+): readonly [SelectionRange["anchor"], SelectionRange["focus"]] => {
+  const forward =
+    ai < fi || (ai === fi && sel.anchor.offset <= sel.focus.offset);
+  return forward ? [sel.anchor, sel.focus] : [sel.focus, sel.anchor];
+};
+
 export const rootId = (_editor: Editor): BlockId => ROOT_ID;
 
 export const getBlock = <K extends BlockKind = BlockKind>(
@@ -694,8 +711,7 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
         const ai = order.indexOf(sel.anchor.blockId);
         const fi = order.indexOf(sel.focus.blockId);
         if (ai < 0 || fi < 0) return "";
-        const [start, end] =
-          ai <= fi ? [sel.anchor, sel.focus] : [sel.focus, sel.anchor];
+        const [start, end] = orderEndpoints(sel, ai, fi);
         if (start.blockId === end.blockId) {
           return readTextOf(start.blockId).slice(start.offset, end.offset);
         }
@@ -738,8 +754,7 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
     const ai = order.indexOf(sel.anchor.blockId);
     const fi = order.indexOf(sel.focus.blockId);
     if (ai < 0 || fi < 0) return;
-    const [start, end] =
-      ai <= fi ? [sel.anchor, sel.focus] : [sel.focus, sel.anchor];
+    const [start, end] = orderEndpoints(sel, ai, fi);
 
     if (start.blockId === end.blockId) {
       const len = end.offset - start.offset;

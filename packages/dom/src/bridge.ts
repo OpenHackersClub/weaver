@@ -1,6 +1,7 @@
 import type { BlockId, Editor } from "@weaver/core";
 import { blockElementContaining, blockIdOf, reconcileTopLevel } from "./dom-mapper.js";
 import {
+  type DomCaret,
   type DomRange,
   placeCaret,
   readDomSelection,
@@ -30,6 +31,19 @@ const MARK_FROM_KEY: Record<string, "bold" | "italic" | "underline" | "strike"> 
   b: "bold",
   i: "italic",
   u: "underline",
+};
+
+// Delete a non-collapsed selection — single- or cross-block — and return the
+// resulting collapsed caret. Routes through the core `selection` command,
+// which deletes each spanned block's covered text and merges the trailing
+// blocks into the anchor (mirroring Lexical's $insertText on a range). The DOM
+// layer must not reinvent that merge; the previous single-block-only guard let
+// a cross-block Backspace / type-over (e.g. after Cmd+A) silently no-op.
+const deleteDomRange = (editor: Editor, range: DomRange): DomCaret => {
+  editor.commands.selection.set(range);
+  editor.commands.selection.deleteRange();
+  const sel = editor.commands.selection.get();
+  return sel ? sel.anchor : range.anchor;
 };
 
 const richifyHost = (host: HTMLElement, opts: BridgeOptions): void => {
@@ -173,24 +187,11 @@ export const attachEditor = (
     ) {
       const data = e.data ?? "";
       if (data.length === 0) return;
-      // If selection is non-collapsed, delete the range first (single-block only for MVP).
-      if (!range.collapsed && range.anchor.blockId === range.focus.blockId) {
-        const start = Math.min(range.anchor.offset, range.focus.offset);
-        const end = Math.max(range.anchor.offset, range.focus.offset);
-        if (end > start) {
-          editor.commands.text.delete({
-            blockId: range.anchor.blockId,
-            offset: start,
-            length: end - start,
-          });
-        }
-        const baseCaret = { blockId: range.anchor.blockId, offset: start };
-        const res = handleInsertText(editor, baseCaret, data);
-        pendingCaret = { anchor: res.caret, focus: res.caret, collapsed: true };
-      } else {
-        const res = handleInsertText(editor, range.anchor, data);
-        pendingCaret = { anchor: res.caret, focus: res.caret, collapsed: true };
-      }
+      // A non-collapsed selection — single- or cross-block — is type-over:
+      // delete it first, then insert at the resulting collapsed caret.
+      const baseCaret = range.collapsed ? range.anchor : deleteDomRange(editor, range);
+      const res = handleInsertText(editor, baseCaret, data);
+      pendingCaret = { anchor: res.caret, focus: res.caret, collapsed: true };
       return;
     }
     if (inputType === "insertParagraph") {
@@ -206,19 +207,10 @@ export const attachEditor = (
       return;
     }
     if (inputType === "deleteContentBackward" || inputType === "deleteWordBackward") {
-      if (!range.collapsed && range.anchor.blockId === range.focus.blockId) {
-        const start = Math.min(range.anchor.offset, range.focus.offset);
-        const end = Math.max(range.anchor.offset, range.focus.offset);
-        editor.commands.text.delete({
-          blockId: range.anchor.blockId,
-          offset: start,
-          length: end - start,
-        });
-        pendingCaret = {
-          anchor: { blockId: range.anchor.blockId, offset: start },
-          focus: { blockId: range.anchor.blockId, offset: start },
-          collapsed: true,
-        };
+      // A non-collapsed selection deletes as a range — single- or cross-block.
+      if (!range.collapsed) {
+        const caret = deleteDomRange(editor, range);
+        pendingCaret = { anchor: caret, focus: caret, collapsed: true };
         return;
       }
       const res = handleBackspace(editor, range.anchor);
@@ -226,19 +218,9 @@ export const attachEditor = (
       return;
     }
     if (inputType === "deleteContentForward" || inputType === "deleteWordForward") {
-      if (!range.collapsed && range.anchor.blockId === range.focus.blockId) {
-        const start = Math.min(range.anchor.offset, range.focus.offset);
-        const end = Math.max(range.anchor.offset, range.focus.offset);
-        editor.commands.text.delete({
-          blockId: range.anchor.blockId,
-          offset: start,
-          length: end - start,
-        });
-        pendingCaret = {
-          anchor: { blockId: range.anchor.blockId, offset: start },
-          focus: { blockId: range.anchor.blockId, offset: start },
-          collapsed: true,
-        };
+      if (!range.collapsed) {
+        const caret = deleteDomRange(editor, range);
+        pendingCaret = { anchor: caret, focus: caret, collapsed: true };
         return;
       }
       const res = handleDeleteForward(editor, range.anchor);
