@@ -81,7 +81,7 @@ Three options were considered for displaying in-progress agent generation ([`har
 - Inline content carries an `agent-pending` mark (one of the marks shipped in v1, see [ADR 0002](adr/0002-notion-style-block-model.md)).
 - UI renders agent-pending content with a distinct visual (background tint, animated underline, or similar).
 - User **accepts** the agent's edits by clearing the `agent-pending` mark (single Loro commit; mark removal). The content stays; the marker is gone.
-- User **rejects** by issuing `UndoManager.undo({ origin: agent-N })` — Loro's peer-scoped undo removes exactly the agent's contribution without touching the user's concurrent edits.
+- User **rejects** the agent's edits. Because the agent is a distinct CRDT peer, its ops are undone through the **agent peer's own `UndoManager`**: Loro's `UndoManager` is bound to one doc and automatically scoped to that doc's peer — there is no cross-peer `undo({ origin })` API. The agent runtime exposes a reject path that calls its own `UndoManager.undo()`; Loro's per-peer undo then removes exactly the agent's contribution without touching the user's concurrent edits.
 
 Why not a fork branch? — see [`hard-problems.md` §5](hard-problems.md).
 

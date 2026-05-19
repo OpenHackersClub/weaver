@@ -37,14 +37,15 @@ The Playground's headline interactive feature: a visitor can **turn on mock AI a
 
 **The toggle.** From the Playground UI, the visitor enables 0–N mock agent peers. Each enabled agent joins the demo doc as a **real CRDT peer**: a separate in-tab `LoroDoc` whose ops are exchanged in-process with the editor's `LoroDoc`. The two peers run the same merge as any human↔human pair — only the transport is short-circuited. This is the demo-only simplification noted on the example switcher above: production agents connect over WebSocket to the Durable Object as a separate peer (see [`ai-agent.md` §2.1](ai-agent.md)). The Playground demonstrates the *peer model* (op stream, presence, scoped undo), not the *production transport*.
 
-**"Mock" means scripted/deterministic, not LLM-backed.** There is no real LLM API call, no `/api/ai/*` SSE traffic, no network. The agent runtime replays a canned script of edits. The point is to faithfully demonstrate the real-time peer behavior — streaming `LoroText.insert` ops committed with `origin: agent-N` (see [`ai-agent.md` §2.1](ai-agent.md)), a moving presence cursor via `EphemeralStore`, the `agent-pending` mark, concurrent human↔agent merge, and peer-scoped undo (`UndoManager.undo({ origin: agent-N })`) — without the cost or nondeterminism of a live model. The marker-and-undo behavior mirrors [`ai-agent.md` §5](ai-agent.md) exactly.
+**"Mock" means scripted/deterministic, not LLM-backed.** There is no real LLM API call, no `/api/ai/*` SSE traffic, no network. The agent runtime replays a canned script of edits. The point is to faithfully demonstrate the real-time peer behavior — streaming `LoroText.insert` ops committed with `origin: agent-N` (see [`ai-agent.md` §2.1](ai-agent.md)), a moving presence cursor via `EphemeralStore`, the `agent-pending` mark (a v1 mark per [`block-model.md` §3](block-model.md)), concurrent human↔agent merge, and peer-scoped undo — without the cost or nondeterminism of a live model. Each mock agent is a distinct CRDT peer running its **own** `UndoManager`, so rejecting an agent calls that agent peer's `UndoManager.undo()` and Loro removes exactly that agent's ops; `UndoManager` is bound to one doc and scoped to that doc's peer — there is no cross-peer `undo({ origin })` API. The marker-and-undo behavior mirrors [`ai-agent.md` §5](ai-agent.md) exactly.
 
 **Controls:**
 
-- Number of agents (0–N).
+- Number of agents (0–3; the `?agents=<n>` param is clamped to this range — 3 echoes the multi-agent table in [`ai-agent.md` §6](ai-agent.md)).
 - Start / stop per agent.
 - Playback speed — how fast the canned script's `insert` ops are committed.
 - Per-agent scope — each mock agent works a distinct `Cursor` range, echoing the multi-agent table in [`ai-agent.md` §6](ai-agent.md).
+- Reject — a per-agent control that issues that agent peer's `UndoManager.undo()`, removing its contribution. This is the reject path of the marker-and-undo pattern in [`ai-agent.md` §5](ai-agent.md).
 - The "ask" panel — a prompt box that **triggers a mock script** (selects which canned edit sequence an agent replays); it is *not* a live LLM call.
 
 The visitor can keep typing mid-stream while an agent is running, to show Loro merging concurrent human↔agent edits without losing the visitor's caret.
@@ -109,12 +110,13 @@ The Playground is **shipped** when the following criteria are independently grad
 
 ### Mock AI agents
 
-- The Mock AI agents toggle is reachable from the UI and via the `?agents=<n>` permalink param; `?agents=0` (or absent) means no agents running.
-- Turning on 2 mock agents shows **two distinct presence cursors**, each carrying `origin: agent-N` on its ops as seen in the op-log overlay.
-- At least one streaming insertion from a running mock agent carries the `agent-pending` mark, rendered with the distinct visual per [`ai-agent.md` §5](ai-agent.md).
-- The visitor can type concurrently while a mock agent streams, and the visitor's caret position is preserved (no caret jump) — demonstrating Loro merging concurrent human↔agent edits.
-- Peer-scoped undo (`UndoManager.undo({ origin: agent-N })`) removes one mock agent's contribution without touching the other agent's edits or the visitor's edits.
-- No `/api/ai/*` request and no outbound network call is made while mock agents run (verified via `Page.on('request')` filtering).
+- The Mock AI agents toggle is reachable from the UI and via the `?agents=<n>` permalink param; `?agents=0` (or absent) means no agents running, and `?agents=3` (the max) is honored.
+- Turning on 2 mock agents yields, independently checkable: (a) two distinct presence cursors visible on the editor surface, and (b) each agent's ops appearing in the op-log overlay tagged `origin: agent-N` — one distinct origin per agent.
+- At least one streaming insertion from a running mock agent carries the `agent-pending` mark (a v1 mark per [`block-model.md` §3](block-model.md)), rendered with the distinct visual per [`ai-agent.md` §5](ai-agent.md).
+- The visitor can type concurrently while a mock agent streams: the visitor's caret offset, read before and after a concurrent agent insert made outside the visitor's block, is unchanged — demonstrating Loro merging concurrent human↔agent edits without disturbing the local caret.
+- Rejecting one agent (that agent peer's own `UndoManager.undo()`) removes that mock agent's contribution without touching the other agent's edits or the visitor's edits — Loro's undo is scoped to each peer.
+- The "ask" panel triggers a running mock agent to replay a selected canned script; no LLM call results.
+- While mock agents run, no request is made to `/api/ai/*` and no request carries agent edit payloads — the agents are scripted, not LLM-backed (verified via `Page.on('request')` filtering for AI traffic).
 
 ### Debug overlays
 - Each of the six debug panels (block tree, op log, version vector, peer panel, subdoc map, serialized state) is independently toggleable via URL param and via UI.
