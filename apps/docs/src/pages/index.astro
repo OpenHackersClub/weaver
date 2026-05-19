@@ -4,12 +4,12 @@ import HeroDiagram from "../components/HeroDiagram.astro";
 import { site } from "../lib/site";
 
 const tenets = [
-  { id: "D1", title: "LoroDoc is the single source of truth", body: "No parallel editor state. History runs through Loro's peer-scoped UndoManager. Time travel and forks are first-class." },
-  { id: "D6", title: "Loro as the CRDT core", body: "Rust-native, WASM build, native rich-text marks, peer-scoped undo. Same engine in browser and Durable Object." },
-  { id: "D9", title: "AI agents are CRDT peers", body: "Token streams become Loro inserts. Presence, cursors, undo origin, scoped grants — same primitives as humans." },
-  { id: "D7", title: "Subdoc partitioning for tiers", body: "Confidentiality tiers as separate LoroDocs. Restricted updates never reach the wire of unauthorized clients. Org-level data scoping done right." },
-  { id: "D11", title: "Cloudflare DO per document", body: "Stateful WebSocket hub with hibernation. R2 for snapshots. D1 for ACL. KV for revocations." },
-  { id: "D19", title: "Trust the server you run", body: "Cooperative-org trust model. Access control is data scoping, not zero-trust insider defense. Audit-grade attribution carries the compliance load." },
+  { id: "01", title: "Undo, history, and forks — built in", body: "The document is the CRDT, so there's no editor state to keep in sync. Per-user undo, time travel, and branching come for free." },
+  { id: "02", title: "One engine, browser to edge", body: "The same Rust/WASM core — with native rich-text marks — runs in the browser and on Cloudflare's edge. No second implementation to drift." },
+  { id: "03", title: "AI agents collaborate like teammates", body: "An agent's output lands as real edits, with its own cursor, presence, and undo scope. You watch its work happen — and you can undo it." },
+  { id: "04", title: "Confidential content stays confidential", body: "Restricted tiers sync as separate documents, so privileged content never reaches a client that isn't cleared for it. Confidentiality by routing, not by hiding." },
+  { id: "05", title: "Real-time sync without running a fleet", body: "Each document is a single stateful edge worker that hibernates when idle. Live collaboration with effectively no servers to operate." },
+  { id: "06", title: "Every edit is attributable", body: "Edits are signed to the authenticated author and recorded in a tamper-evident log. When someone asks who changed what, there's a precise answer." },
 ];
 ---
 
@@ -17,7 +17,7 @@ const tenets = [
   <section class="hero">
     <div class="container">
       <div class="hero__meta">
-        <span class="section-marker reveal" data-delay="1">§00 / Manifest</span>
+        <span class="section-marker reveal" data-delay="1">§00 / Overview</span>
         <span class="section-marker reveal" data-delay="1">{site.status}</span>
       </div>
       <h1 class="hero__title reveal" data-delay="2">
@@ -30,7 +30,7 @@ const tenets = [
         on Cloudflare. Server-enforced access control with cryptographic attribution on every op.
       </p>
       <div class="hero__cta reveal" data-delay="4">
-        <a class="btn" href="/docs/prd">Read the spec</a>
+        <a class="btn" href="/docs">Read the docs</a>
         <a class="btn btn--ghost" href="/docs/comparison">vs. other editors</a>
       </div>
     </div>
@@ -40,8 +40,8 @@ const tenets = [
   <section class="manifesto">
     <div class="container">
       <div class="manifesto__header">
-        <span class="section-marker">§01 / Tenets in prose</span>
-        <h2>What we mean by "first-class."</h2>
+        <span class="section-marker">§01 / How it works</span>
+        <h2>What "first-class collaboration" means for you.</h2>
       </div>
       <ol class="manifesto__list">
         <li class="manifesto__item">
@@ -93,8 +93,8 @@ const tenets = [
   <section class="tenets">
     <div class="container">
       <div class="tenets__header">
-        <span class="section-marker">§02 / Decisions on file</span>
-        <h2>Eighteen decisions. Four ADRs. Read them.</h2>
+        <span class="section-marker">§02 / What you get</span>
+        <h2>Built for the way teams — and agents — actually work.</h2>
       </div>
       <div class="tenets__grid">
         {tenets.map((t) => (
@@ -108,73 +108,14 @@ const tenets = [
     </div>
   </section>
 
-  <section class="compare">
-    <div class="container">
-      <div class="compare__intro">
-        <div>
-          <span class="section-marker">§03 / Positioning</span>
-          <h2>Other editors miss one of three things. weaver is built around all three.</h2>
-        </div>
-        <p>
-          Today's serious rich-text editor options force a trade-off where one of these is always
-          missing. weaver fills the gap — open-source, in TypeScript, deployable on the org's own
-          Cloudflare edge.
-        </p>
-      </div>
-
-      <table class="compare__table">
-        <thead>
-          <tr>
-            <th>Editor</th>
-            <th>AI agents as CRDT peers</th>
-            <th>CRDT as document model</th>
-            <th>Local-first by default</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Lexical</td>
-            <td class="compare__no">—</td>
-            <td class="compare__no">—</td>
-            <td class="compare__no">—</td>
-          </tr>
-          <tr>
-            <td>ProseMirror + Y.js</td>
-            <td class="compare__no">—</td>
-            <td class="compare__no">—</td>
-            <td class="compare__no">—</td>
-          </tr>
-          <tr>
-            <td>Tiptap + Hocuspocus</td>
-            <td class="compare__no">—</td>
-            <td class="compare__no">—</td>
-            <td class="compare__no">partial</td>
-          </tr>
-          <tr>
-            <td>BlockSuite / AFFiNE</td>
-            <td class="compare__no">—</td>
-            <td class="compare__yes">✓</td>
-            <td class="compare__yes">✓</td>
-          </tr>
-          <tr class="is-weaver">
-            <td>weaver</td>
-            <td class="compare__yes">✓</td>
-            <td class="compare__yes">✓</td>
-            <td class="compare__yes">✓</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </section>
-
   <section class="container">
     <div class="cta-band">
       <div>
         <span class="section-marker">§04 / Read on</span>
-        <h2>Pre-implementation. The specs are the contract.</h2>
+        <h2>Everything weaver, documented.</h2>
       </div>
       <div class="cta-band__actions">
-        <a class="btn" href="/docs/prd">Open the PRD</a>
+        <a class="btn" href="/docs">Browse the docs</a>
         <a class="btn btn--ghost" href={site.repo} target="_blank" rel="noreferrer noopener">View on GitHub ↗</a>
       </div>
     </div>

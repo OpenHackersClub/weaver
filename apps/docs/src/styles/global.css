@@ -664,67 +664,6 @@ pre code {
   margin: 0;
 }
 
-/* ---- Landing: Compare block -------------------------------------------- */
-
-.compare {
-  padding: 5rem 0;
-  border-bottom: 1px solid var(--hairline);
-}
-.compare__intro {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 3rem;
-  margin-bottom: 3rem;
-}
-.compare__intro h2 {
-  font-size: var(--fs-h2);
-  font-variation-settings: "opsz" 100, "SOFT" 70;
-  max-width: 22ch;
-  margin-top: 0.5rem;
-}
-.compare__intro p {
-  color: var(--ink-soft);
-  font-size: var(--fs-lead);
-  line-height: 1.55;
-}
-
-.compare__table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--fs-small);
-  font-family: var(--font-body);
-}
-.compare__table th,
-.compare__table td {
-  text-align: left;
-  padding: 0.75rem 0.75rem;
-  border-bottom: 1px solid var(--hairline);
-  vertical-align: top;
-}
-.compare__table thead th {
-  font-family: var(--font-mono);
-  font-size: var(--fs-tiny);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-  font-weight: 500;
-  border-bottom: 2px solid var(--ink);
-}
-.compare__table tbody tr.is-weaver {
-  background: var(--accent-soft);
-}
-.compare__table tbody tr.is-weaver td:first-child {
-  color: var(--accent);
-  font-weight: 600;
-}
-.compare__yes {
-  color: var(--accent);
-  font-weight: 600;
-}
-.compare__no {
-  color: var(--muted-soft);
-}
-
 /* ---- Landing: CTA ------------------------------------------------------- */
 
 .cta-band {
@@ -1394,7 +1333,6 @@ pre code {
     grid-template-columns: 60px 1fr;
     gap: 1rem;
   }
-  .compare__intro,
   .cta-band,
   .docs-index__header,
   .site-footer__grid {

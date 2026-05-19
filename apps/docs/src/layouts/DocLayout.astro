@@ -20,16 +20,16 @@ const next = findNext(slug);
 const sectionTitle =
   section ??
   nav.find((s) => s.items.some((i) => i.slug === slug))?.title ??
-  "Specs";
+  "Docs";
 ---
 
-<BaseLayout title={`${title} — weaver specs`} description={description}>
+<BaseLayout title={`${title} — weaver docs`} description={description}>
   <div class="docs-shell">
     <Sidebar currentSlug={slug} />
     <article>
       <header class="doc-header">
         <div class="doc-header__crumb">
-          <a href="/docs">Specs</a>
+          <a href="/docs">Docs</a>
           <span class="sep">/</span>
           <span>{sectionTitle}</span>
         </div>

@@ -18,12 +18,12 @@ export type NavSection = {
 export const nav: NavSection[] = [
   {
     number: "00",
-    title: "Overview",
+    title: "Get started",
     items: [
       {
         slug: "prd",
-        label: "Product Requirements",
-        blurb: "Vision, users, scope, roadmap, decisions index.",
+        label: "Introduction",
+        blurb: "What weaver is, who it's for, what ships in v1, and the decisions behind it.",
       },
     ],
   },
@@ -85,7 +85,7 @@ export const nav: NavSection[] = [
       {
         slug: "playground",
         label: "Playground",
-        blurb: "Standalone demo webapp shipped to Cloudflare Pages; spec + outcome rubric.",
+        blurb: "Standalone demo webapp shipped to Cloudflare Pages — what it demos and how it ships.",
       },
     ],
   },
