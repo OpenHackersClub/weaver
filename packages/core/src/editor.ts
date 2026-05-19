@@ -36,6 +36,10 @@ const DEFAULT_TEXT_STYLES = {
   code: { expand: "none" as const },
   link: { expand: "none" as const },
   highlight: { expand: "after" as const },
+  // A streamed agent insert should extend the marked run, so `expand: "after"`
+  // (specs/ai-agent.md §5 — the marker pattern). The mark VALUE is the agent
+  // id string (e.g. "agent-1").
+  "agent-pending": { expand: "after" as const },
 };
 
 /** Every mark key the editor knows about — used to clear all formatting. */
@@ -48,7 +52,8 @@ export type MarkKind =
   | "strike"
   | "code"
   | "link"
-  | "highlight";
+  | "highlight"
+  | "agent-pending";
 
 export type EditorOrigin = "user" | "agent" | "system" | (string & {});
 
