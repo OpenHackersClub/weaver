@@ -5,6 +5,7 @@ import {
   reconcileTopLevel,
   renderBlockElement,
   tagFor,
+  wrapWithMarks,
 } from "../src/dom-mapper.js";
 
 /**
@@ -195,5 +196,40 @@ describe("@weaver/dom / mark rendering", () => {
     });
     const el = renderBlockElement(editor, id);
     expect(el.querySelector("code")?.textContent).toBe("x");
+  });
+});
+
+describe("@weaver/dom / agent-pending mark rendering", () => {
+  it("wraps an agent-pending run in span.weaver-agent-pending[data-agent]", () => {
+    const node = wrapWithMarks(document, "drafting...", {
+      "agent-pending": "agent-1",
+    });
+    expect(node).toBeInstanceOf(HTMLSpanElement);
+    const span = node as HTMLSpanElement;
+    expect(span.classList.contains("weaver-agent-pending")).toBe(true);
+    expect(span.getAttribute("data-agent")).toBe("agent-1");
+    expect(span.textContent).toBe("drafting...");
+  });
+
+  it("stringifies a non-string agent-pending value into data-agent", () => {
+    const node = wrapWithMarks(document, "x", { "agent-pending": 2 });
+    expect((node as HTMLElement).getAttribute("data-agent")).toBe("2");
+  });
+
+  it("places agent-pending outside other marks (it is the outermost layer)", () => {
+    const node = wrapWithMarks(document, "bold draft", {
+      bold: true,
+      "agent-pending": "agent-2",
+    });
+    const span = node as HTMLSpanElement;
+    expect(span.classList.contains("weaver-agent-pending")).toBe(true);
+    expect(span.querySelector("strong")?.textContent).toBe("bold draft");
+  });
+
+  it("does not wrap when agent-pending is absent or falsy", () => {
+    const plain = wrapWithMarks(document, "hi", {});
+    expect(plain).toBeInstanceOf(Text);
+    const falsy = wrapWithMarks(document, "hi", { "agent-pending": "" });
+    expect(falsy).toBeInstanceOf(Text);
   });
 });

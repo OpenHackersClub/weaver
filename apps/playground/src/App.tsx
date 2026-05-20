@@ -4,6 +4,9 @@ import { EditorRoot, useEditor } from "@weaver/react";
 import { EXAMPLES, seedExample, type ExampleId } from "./examples.js";
 import { readUrlState, writeUrlState, type DebugPanelId } from "./url-state.js";
 import { DebugPanels } from "./debug-panels.js";
+import { createRuntime } from "./agents/runtime.js";
+import { AgentsPanel } from "./agents/agents-panel.js";
+import { PresenceLayer } from "./agents/presence-layer.js";
 
 const ALL_DEBUG_PANELS: ReadonlyArray<DebugPanelId> = ["tree", "ops", "vv"];
 
@@ -42,25 +45,51 @@ const installDebugGlobals = (editor: ReturnType<typeof useEditor>) => {
 export const App = () => {
   const initial = useMemo(() => readUrlState(window.location.search), []);
   const editor = useEditor({ origin: "user" });
+  const [runtime] = useState(() => createRuntime(editor));
   const [example, setExample] = useState<ExampleId>(initial.example);
   const [debug, setDebug] = useState<ReadonlySet<DebugPanelId>>(initial.debug);
   const [theme, setTheme] = useState<"light" | "dark">(initial.theme);
+  const [agents, setAgents] = useState<number>(initial.agents);
+
+  const opLogEditors = useMemo(
+    () => [editor, ...runtime.agentEditors()],
+    [editor, runtime],
+  );
 
   useEffect(() => {
     installDebugGlobals(editor);
   }, [editor]);
 
   useEffect(() => {
+    return () => runtime.dispose();
+  }, [runtime]);
+
+  // Reseed the visitor's doc on example change. `reset` first stops every
+  // agent and clears its internal state so the reseed starts from a clean
+  // slate; the agent count is then (re)applied by the effect below.
+  useEffect(() => {
+    runtime.reset();
     seedExample(editor, example);
-  }, [editor, example]);
+  }, [editor, runtime, example]);
 
   useEffect(() => {
-    writeUrlState({ example, debug, theme });
-  }, [example, debug, theme]);
+    runtime.setCount(agents);
+  }, [runtime, agents]);
+
+  useEffect(() => {
+    writeUrlState({ example, debug, theme, agents });
+  }, [example, debug, theme, agents]);
 
   useEffect(() => {
     document.documentElement.dataset["theme"] = theme;
   }, [theme]);
+
+  const chooseExample = (id: ExampleId): void => {
+    setExample(id);
+    // The "agent-collab" example ships with the Mock AI agents feature
+    // pre-enabled (specs/playground.md §What it shows item 2).
+    setAgents(id === "agent" ? 2 : 0);
+  };
 
   const toggleDebug = (id: DebugPanelId): void => {
     setDebug((prev) => {
@@ -90,7 +119,7 @@ export const App = () => {
                   <button
                     type="button"
                     data-active={ex.id === example}
-                    onClick={() => setExample(ex.id)}
+                    onClick={() => chooseExample(ex.id)}
                   >
                     {ex.label}
                   </button>
@@ -99,6 +128,7 @@ export const App = () => {
               ))}
             </ul>
           </section>
+          <AgentsPanel runtime={runtime} />
           <section>
             <h2>Debug overlays</h2>
             <ul className="debug-list">
@@ -128,8 +158,9 @@ export const App = () => {
         </nav>
         <main className="surface">
           <EditorRoot editor={editor} className="editor" autoFocus />
+          <PresenceLayer editor={editor} presence={runtime.presence} />
         </main>
-        <DebugPanels editor={editor} enabled={debug} />
+        <DebugPanels editor={editor} opLogEditors={opLogEditors} enabled={debug} />
       </div>
       <footer className="app-footer">
         <p>

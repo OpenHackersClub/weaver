@@ -36,6 +36,10 @@ const DEFAULT_TEXT_STYLES = {
   code: { expand: "none" as const },
   link: { expand: "none" as const },
   highlight: { expand: "after" as const },
+  // A streamed agent insert should extend the marked run, so `expand: "after"`
+  // (specs/ai-agent.md §5 — the marker pattern). The mark VALUE is the agent
+  // id string (e.g. "agent-1").
+  "agent-pending": { expand: "after" as const },
 };
 
 /** Every mark key the editor knows about — used to clear all formatting. */
@@ -48,7 +52,8 @@ export type MarkKind =
   | "strike"
   | "code"
   | "link"
-  | "highlight";
+  | "highlight"
+  | "agent-pending";
 
 export type EditorOrigin = "user" | "agent" | "system" | (string & {});
 
@@ -275,6 +280,23 @@ const validateMarkValue = (mark: MarkKind, value: unknown): void => {
       throw new Error("link mark requires a non-empty `href`");
     }
   }
+};
+
+/**
+ * Order a selection's two endpoints into `[start, end]` document order.
+ * `ai`/`fi` are the anchor/focus block indices in document order; when both
+ * endpoints sit in the *same* block the offsets break the tie — without that,
+ * a backward within-block selection (anchor offset > focus offset) yields a
+ * negative-length range and silently deletes nothing.
+ */
+const orderEndpoints = (
+  sel: SelectionRange,
+  ai: number,
+  fi: number,
+): readonly [SelectionRange["anchor"], SelectionRange["focus"]] => {
+  const forward =
+    ai < fi || (ai === fi && sel.anchor.offset <= sel.focus.offset);
+  return forward ? [sel.anchor, sel.focus] : [sel.focus, sel.anchor];
 };
 
 export const rootId = (_editor: Editor): BlockId => ROOT_ID;
@@ -689,8 +711,7 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
         const ai = order.indexOf(sel.anchor.blockId);
         const fi = order.indexOf(sel.focus.blockId);
         if (ai < 0 || fi < 0) return "";
-        const [start, end] =
-          ai <= fi ? [sel.anchor, sel.focus] : [sel.focus, sel.anchor];
+        const [start, end] = orderEndpoints(sel, ai, fi);
         if (start.blockId === end.blockId) {
           return readTextOf(start.blockId).slice(start.offset, end.offset);
         }
@@ -733,8 +754,7 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
     const ai = order.indexOf(sel.anchor.blockId);
     const fi = order.indexOf(sel.focus.blockId);
     if (ai < 0 || fi < 0) return;
-    const [start, end] =
-      ai <= fi ? [sel.anchor, sel.focus] : [sel.focus, sel.anchor];
+    const [start, end] = orderEndpoints(sel, ai, fi);
 
     if (start.blockId === end.blockId) {
       const len = end.offset - start.offset;

@@ -155,6 +155,8 @@ a {
   padding: 32px 48px;
   overflow-y: auto;
   background: var(--bg);
+  /* Positioning context for the absolutely-positioned presence overlay. */
+  position: relative;
 }
 
 .editor {
@@ -284,4 +286,163 @@ h6.weaver-heading {
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 12px;
+}
+
+/* ── Mock AI agents ─────────────────────────────────────────────── */
+
+.agents-blurb {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.agents-count {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.agents-count button {
+  flex: 1;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.agents-count button[data-active="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.agents-speed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.agents-speed input {
+  flex: 1;
+}
+
+.agent-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px;
+}
+
+.agent-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 0;
+  font-size: 12px;
+}
+
+.agent-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.agent-name {
+  flex: 1;
+}
+
+.agent-progress {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-list button,
+.agent-ask button {
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.agent-list li[data-running="true"] [data-agent-toggle] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.agent-ask {
+  display: flex;
+  gap: 4px;
+}
+
+.agent-ask input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+/* The `agent-pending` mark — agent-streamed content awaiting accept/reject
+   (specs/ai-agent.md §5). A tinted, animated underline distinguishes it from
+   committed content. */
+.weaver-agent-pending {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 2px;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  animation: weaver-agent-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes weaver-agent-pulse {
+  0%,
+  100% {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+  50% {
+    background: color-mix(in srgb, var(--accent) 26%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .weaver-agent-pending {
+    animation: none;
+  }
+}
+
+/* Remote agent presence carets, drawn by @weaver/dom's presence overlay. */
+.weaver-presence-layer {
+  z-index: 5;
+}
+
+.weaver-presence-caret {
+  width: 2px;
+  height: 1.4em;
+  background: var(--presence-color, var(--accent));
+}
+
+.weaver-presence-label {
+  position: absolute;
+  top: -1.15em;
+  left: 0;
+  white-space: nowrap;
+  background: var(--presence-color, var(--accent));
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 4px;
+  border-radius: 3px;
 }

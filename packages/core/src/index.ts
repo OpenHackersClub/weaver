@@ -33,3 +33,9 @@ export {
   type SelectionRange,
   type MarkKind,
 } from "./editor.js";
+export { connectPeers, type PeerLink } from "./peer-link.js";
+export {
+  createPresenceHub,
+  type PresenceHub,
+  type PresenceRecord,
+} from "./presence.js";

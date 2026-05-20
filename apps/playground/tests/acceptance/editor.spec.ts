@@ -112,6 +112,70 @@ test.describe("Backspace at the start of a block", () => {
   });
 });
 
+test.describe("range selection delete / replace", () => {
+  const typeThreeBlocks = async (page: Page) => {
+    await focusEditor(page);
+    await page.keyboard.type("first");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("second");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("third");
+    await expect(page.locator('[data-weaver-root] [data-block-id]')).toHaveCount(3);
+  };
+
+  test("select-all then Backspace clears every block to one empty paragraph", async ({
+    page,
+  }) => {
+    await page.goto(EMPTY_DOC_URL);
+    await typeThreeBlocks(page);
+    await page.keyboard.press("Control+a");
+    await page.keyboard.press("Backspace");
+    await expect(page.locator('[data-weaver-root] [data-block-id]')).toHaveCount(1);
+    expect(await blockTexts(page)).toEqual([""]);
+  });
+
+  test("select-all then typing replaces the whole doc with the typed text", async ({
+    page,
+  }) => {
+    await page.goto(EMPTY_DOC_URL);
+    await typeThreeBlocks(page);
+    await page.keyboard.press("Control+a");
+    await page.keyboard.type("replaced");
+    await expect(page.locator('[data-weaver-root] [data-block-id]')).toHaveCount(1);
+    expect(await blockTexts(page)).toEqual(["replaced"]);
+  });
+
+  test("a cross-block selection deletes the spanned text and merges the blocks", async ({
+    page,
+  }) => {
+    await page.goto(EMPTY_DOC_URL);
+    await focusEditor(page);
+    await page.keyboard.type("hello");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("world");
+    // Caret at end of "world" (offset 5). Extend the selection left across the
+    // whole of "world" (5) and the block boundary into the last char of
+    // "hello" (2 more) — covering "o\nworld", leaving "hell".
+    for (let i = 0; i < 7; i++) {
+      await page.keyboard.press("Shift+ArrowLeft");
+    }
+    await page.keyboard.press("Backspace");
+    await expect(page.locator('[data-weaver-root] [data-block-id]')).toHaveCount(1);
+    expect(await blockTexts(page)).toEqual(["hell"]);
+  });
+
+  test("a within-block selection is replaced by typed text", async ({ page }) => {
+    await page.goto(EMPTY_DOC_URL);
+    await focusEditor(page);
+    await page.keyboard.type("hello world");
+    for (let i = 0; i < "world".length; i++) {
+      await page.keyboard.press("Shift+ArrowLeft");
+    }
+    await page.keyboard.type("there");
+    expect(await blockTexts(page)).toEqual(["hello there"]);
+  });
+});
+
 test.describe("markdown shortcut", () => {
   test("'# ' at start of paragraph transforms it to heading level 1", async ({
     page,
