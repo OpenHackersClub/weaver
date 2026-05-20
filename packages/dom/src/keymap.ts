@@ -246,6 +246,42 @@ export const handleBackspace = (editor: Editor, caret: DomCaret): ApplyResult | 
   return { caret: { blockId: prev, offset: prevLen } };
 };
 
+const isWhitespace = (ch: string): boolean => /\s/.test(ch);
+
+/**
+ * Find the offset that a word-backwards delete should target — i.e. the start
+ * of the run that the caret is currently logically attached to. Walks back from
+ * `caret.offset` first over trailing whitespace, then over the contiguous
+ * non-whitespace run before that. This matches macOS/Chrome Option+Backspace:
+ * `"hello world|"` → delete `"world"`; a second press on `"hello "` deletes
+ * `"hello "` (the trailing space is consumed as the leading whitespace skip).
+ */
+const wordBackwardOffset = (text: string, offset: number): number => {
+  let i = Math.min(offset, text.length);
+  while (i > 0 && isWhitespace(text[i - 1] ?? "")) i--;
+  while (i > 0 && !isWhitespace(text[i - 1] ?? "")) i--;
+  return i;
+};
+
+export const handleWordBackspace = (
+  editor: Editor,
+  caret: DomCaret,
+): ApplyResult | null => {
+  if (caret.offset > 0) {
+    const text = editor.commands.text.read(caret.blockId);
+    const target = wordBackwardOffset(text, caret.offset);
+    if (target < caret.offset) {
+      editor.commands.text.delete({
+        blockId: caret.blockId,
+        offset: target,
+        length: caret.offset - target,
+      });
+      return { caret: { blockId: caret.blockId, offset: target } };
+    }
+  }
+  return handleBackspace(editor, caret);
+};
+
 export const handleDeleteForward = (
   editor: Editor,
   caret: DomCaret,

@@ -127,6 +127,44 @@ describe("@weaver/dom / Backspace", () => {
   });
 });
 
+describe("@weaver/dom / Option+Backspace (deleteWordBackward)", () => {
+  it("deletes the trailing word, leaving any preceding text intact", () => {
+    f.type("hello world");
+    f.press("deleteWordBackward");
+    expect(f.blockTexts()).toEqual(["hello "]);
+  });
+
+  it("a second press consumes the trailing space and the previous word", () => {
+    f.type("hello world");
+    f.press("deleteWordBackward");
+    f.press("deleteWordBackward");
+    expect(f.blockTexts()).toEqual([""]);
+  });
+
+  it("at offset 0 falls back to block-merge backspace", () => {
+    f.type("first");
+    f.press("insertParagraph");
+    f.type("second");
+    const second = f.blockEls()[1]!;
+    const text = second.firstChild as Text | null;
+    const range = document.createRange();
+    if (text) {
+      range.setStart(text, 0);
+      range.setEnd(text, 0);
+    } else {
+      range.setStart(second, 0);
+      range.setEnd(second, 0);
+    }
+    const sel = document.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    f.press("deleteWordBackward");
+    expect(f.blockEls()).toHaveLength(1);
+    expect(f.blockTexts()).toEqual(["firstsecond"]);
+  });
+});
+
 describe("@weaver/dom / formatting via Ctrl+B / Ctrl+I / Ctrl+U", () => {
   it("Ctrl+B over a selection toggles bold on the LoroDoc text", () => {
     f.type("hello");

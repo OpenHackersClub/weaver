@@ -15,6 +15,7 @@ import {
   handleInsertLineBreak,
   handleInsertText,
   handleToggleMark,
+  handleWordBackspace,
 } from "./keymap.js";
 
 export interface BridgeOptions {
@@ -213,7 +214,10 @@ export const attachEditor = (
         pendingCaret = { anchor: caret, focus: caret, collapsed: true };
         return;
       }
-      const res = handleBackspace(editor, range.anchor);
+      const res =
+        inputType === "deleteWordBackward"
+          ? handleWordBackspace(editor, range.anchor)
+          : handleBackspace(editor, range.anchor);
       if (res) pendingCaret = { anchor: res.caret, focus: res.caret, collapsed: true };
       return;
     }
