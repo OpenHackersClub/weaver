@@ -14,7 +14,11 @@ import {
   handleEnter,
   handleInsertLineBreak,
   handleInsertText,
+  handleLineBackspace,
+  handleLineDeleteForward,
   handleToggleMark,
+  handleWordBackspace,
+  handleWordDeleteForward,
 } from "./keymap.js";
 
 export interface BridgeOptions {
@@ -180,12 +184,27 @@ export const attachEditor = (
       if (!range) return;
     }
     const inputType = e.inputType;
+
+    // Insert family. The OS-level intent here is always "place this text at the
+    // caret, replacing any non-collapsed selection." The variants differ only
+    // in *where* the text comes from (typing, paste, drop, yank, autocorrect)
+    // — and where the browser stuffs it on the event. `insertText` /
+    // `insertReplacementText` put the string in `e.data`; clipboard/drag-source
+    // variants may instead populate `e.dataTransfer`. Either is fine because
+    // the model op is the same.
     if (
       inputType === "insertText" ||
       inputType === "insertReplacementText" ||
-      inputType === "insertFromPaste"
+      inputType === "insertFromPaste" ||
+      inputType === "insertFromPasteAsQuotation" ||
+      inputType === "insertFromDrop" ||
+      inputType === "insertFromYank" ||
+      inputType === "insertFromComposition"
     ) {
-      const data = e.data ?? "";
+      let data = e.data ?? "";
+      if (data.length === 0 && e.dataTransfer) {
+        data = e.dataTransfer.getData("text/plain") ?? "";
+      }
       if (data.length === 0) return;
       // A non-collapsed selection — single- or cross-block — is type-over:
       // delete it first, then insert at the resulting collapsed caret.
@@ -206,27 +225,88 @@ export const attachEditor = (
       pendingCaret = { anchor: res.caret, focus: res.caret, collapsed: true };
       return;
     }
-    if (inputType === "deleteContentBackward" || inputType === "deleteWordBackward") {
-      // A non-collapsed selection deletes as a range — single- or cross-block.
+
+    // Backwards-delete family. macOS / Chromium emit a different `inputType`
+    // for each granularity (char / word / visual-line); we translate each into
+    // the matching keymap handler. A non-collapsed selection short-circuits
+    // every granularity — the OS-level intent is just "remove the selection."
+    if (
+      inputType === "deleteContentBackward" ||
+      inputType === "deleteWordBackward" ||
+      inputType === "deleteSoftLineBackward" ||
+      inputType === "deleteHardLineBackward"
+    ) {
       if (!range.collapsed) {
         const caret = deleteDomRange(editor, range);
         pendingCaret = { anchor: caret, focus: caret, collapsed: true };
         return;
       }
-      const res = handleBackspace(editor, range.anchor);
+      const handler =
+        inputType === "deleteWordBackward"
+          ? handleWordBackspace
+          : inputType === "deleteSoftLineBackward" ||
+              inputType === "deleteHardLineBackward"
+            ? handleLineBackspace
+            : handleBackspace;
+      const res = handler(editor, range.anchor);
       if (res) pendingCaret = { anchor: res.caret, focus: res.caret, collapsed: true };
       return;
     }
-    if (inputType === "deleteContentForward" || inputType === "deleteWordForward") {
+
+    // Forwards-delete family — symmetric to the backwards variants above.
+    if (
+      inputType === "deleteContentForward" ||
+      inputType === "deleteWordForward" ||
+      inputType === "deleteSoftLineForward" ||
+      inputType === "deleteHardLineForward"
+    ) {
       if (!range.collapsed) {
         const caret = deleteDomRange(editor, range);
         pendingCaret = { anchor: caret, focus: caret, collapsed: true };
         return;
       }
-      const res = handleDeleteForward(editor, range.anchor);
+      const handler =
+        inputType === "deleteWordForward"
+          ? handleWordDeleteForward
+          : inputType === "deleteSoftLineForward" ||
+              inputType === "deleteHardLineForward"
+            ? handleLineDeleteForward
+            : handleDeleteForward;
+      const res = handler(editor, range.anchor);
       if (res) pendingCaret = { anchor: res.caret, focus: res.caret, collapsed: true };
       return;
     }
+
+    // Cut / drag-source / composition-replace. The browser has already done
+    // its half — `cut` populated the clipboard (we don't preventDefault `cut`),
+    // `dragstart` populated `dataTransfer`, IME finalized composition — and
+    // now signals "remove the corresponding range from the model." Equivalent
+    // to deleting a non-collapsed selection.
+    if (
+      inputType === "deleteByCut" ||
+      inputType === "deleteByDrag" ||
+      inputType === "deleteByComposition"
+    ) {
+      if (!range.collapsed) {
+        const caret = deleteDomRange(editor, range);
+        pendingCaret = { anchor: caret, focus: caret, collapsed: true };
+      }
+      return;
+    }
+
+    // Safari delivers Cmd+Z / Cmd+Shift+Z to contenteditable as a beforeinput
+    // event rather than (only) as a keydown. Wire both signals to the same
+    // Loro `UndoManager` so Safari undo doesn't silently miss when the user
+    // initiates undo before any keydown reaches our handler.
+    if (inputType === "historyUndo") {
+      editor.commands.history.undo();
+      return;
+    }
+    if (inputType === "historyRedo") {
+      editor.commands.history.redo();
+      return;
+    }
+
     // Unknown / unsupported inputType: already preventDefault'd above.
   };
 
