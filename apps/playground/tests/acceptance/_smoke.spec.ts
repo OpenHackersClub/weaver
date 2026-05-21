@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./_fixtures";
 
 const LIVE = process.env["WEAVER_SMOKE_URL"];
 

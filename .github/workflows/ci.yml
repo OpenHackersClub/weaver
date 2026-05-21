@@ -47,9 +47,6 @@ jobs:
       - name: Typecheck @weaver/react
         run: pnpm --filter @weaver/react typecheck
 
-      - name: Unit tests — @weaver/core
-        run: pnpm --filter @weaver/core test
-
       - name: Build playground SPA
         run: pnpm --filter @weaver/playground build
 
@@ -71,49 +68,42 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-  acceptance:
-    name: Playwright acceptance (@weaver/playground)
+  unit-tests:
+    name: Unit tests (flare-dispatch)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
+      - uses: openhackersclub/flare-dispatch-action@v1
         with:
-          version: 9.12.0
-          run_install: false
+          run: offload-test
+          endpoint: ${{ vars.FLAREDISPATCH_ENDPOINT }}
+          hmac-secret: ${{ secrets.FLAREDISPATCH_HMAC }}
+          mode: await
+          timeout: 15m
+          inputs: |
+            {
+              "repo": "${{ github.repository }}",
+              "sha": "${{ github.sha }}",
+              "command": "pnpm test"
+            }
 
-      - uses: actions/setup-node@v4
+  acceptance:
+    name: Playwright acceptance (flare-dispatch CDP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: openhackersclub/flare-dispatch-action@v1
         with:
-          node-version: 20
-          cache: pnpm
-
-      - name: Install
-        run: pnpm install --frozen-lockfile
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Install Playwright browsers
-        run: pnpm --filter @weaver/playground exec playwright install --with-deps chromium
-
-      - name: Build playground SPA
-        run: pnpm --filter @weaver/playground build
-
-      - name: Run Playwright acceptance suite
-        run: pnpm --filter @weaver/playground test
-        env:
-          CI: "1"
-
-      - name: Upload Playwright report on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: apps/playground/playwright-report
-          retention-days: 7
+          run: cdp-acceptance
+          endpoint: ${{ vars.FLAREDISPATCH_ENDPOINT }}
+          hmac-secret: ${{ secrets.FLAREDISPATCH_HMAC }}
+          mode: await
+          timeout: 30m
+          inputs: |
+            {
+              "repo": "${{ github.repository }}",
+              "sha": "${{ github.sha }}",
+              "appBootCommand": "pnpm --filter @weaver/playground build && pnpm --filter @weaver/playground exec vite preview --host 0.0.0.0 --port 5181 --strictPort",
+              "appPort": 5181,
+              "testCommand": "pnpm --filter @weaver/playground test:acceptance:cdp"
+            }

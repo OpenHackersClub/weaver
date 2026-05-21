@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./_fixtures";
 
 /**
  * List + indent/outdent acceptance tests — TDD red.
