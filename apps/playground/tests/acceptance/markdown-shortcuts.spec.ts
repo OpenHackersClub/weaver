@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./_fixtures";
 
 /**
  * Markdown-shortcut acceptance tests against the deployed playground.
