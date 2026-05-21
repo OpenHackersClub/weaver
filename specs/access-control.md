@@ -12,7 +12,7 @@
 
 - Per-document and per-subdoc read/write access (org-level scoping).
 - Per-mode product affordances (read-only, comment, suggest, write, admin) — enforced as UI gating + tier-write gate at the DO; not as a hardening boundary against insiders.
-- AI agents as distinct subjects with **attenuated grants** that bound prompt-injection blast radius (see [ADR 0006](./adr/0006-ai-agent-threat-model.md)).
+- AI agents as distinct subjects with **attenuated grants** that bound prompt-injection blast radius (see [ADR 0005 §"Agent threat surface"](./adr/0005-trust-model.md#agent-threat-surface)).
 - Cryptographic attribution (every op tied to an authenticated subject) for compliance reporting.
 - Revocation with bounded propagation latency.
 - Audit-grade hash-chained log.
@@ -33,7 +33,7 @@
 |---|---|---|
 | **A1: Unauthenticated network** | Sniff WS traffic, attempt connections | TLS terminates at Cloudflare edge; WS upgrade rejected without valid token. |
 | **A2: Authenticated but unauthorized user** | Has a valid token for *some* docs; tries to access others | D1 ACL lookup at upgrade; subdoc partitioning at sync layer; tier-write gate at the DO. |
-| **A3: Prompt-injected AI agent** *(the sharp one)* | Holds a legitimate attenuated token; agent's behavior is driven by hostile doc content trying to exfiltrate or escalate | Capability scope enforced server-side regardless of prompt; tools derived from token at session start; `requires_user_confirmation` on destructive ops. Full treatment in [ADR 0006](./adr/0006-ai-agent-threat-model.md). |
+| **A3: Prompt-injected AI agent** *(the sharp one)* | Holds a legitimate attenuated token; agent's behavior is driven by hostile doc content trying to exfiltrate or escalate | Capability scope enforced server-side regardless of prompt; tools derived from token at session start; `requires_user_confirmation` on destructive ops. Full treatment in [ADR 0005 §"Agent threat surface"](./adr/0005-trust-model.md#agent-threat-surface). |
 | **A4: Stolen capability token** | Holds a valid Biscuit; original subject doesn't know | Short token lifetimes; revocation list in KV; key rotation; session-binding caveat. |
 | **A5: External audit-log tamperer** | Has read/write on R2 audit objects (e.g. compromised cloud admin, accidental overwrite) | Hash-chain integrity; latest hash exported off-host. Re-derivation reveals tampering. |
 | **A6: Sidechannel observer** | Watches DO event timing, broadcast fan-out | Out of scope; documented in §18. |

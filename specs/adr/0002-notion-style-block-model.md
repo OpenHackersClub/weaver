@@ -47,7 +47,7 @@ For both, the v1 answer is the `embed` block — an iframe sandbox pointing at a
 ### Immediate
 
 - `architecture.md` §2 (document model) specifies the Notion-style block layout at a high level.
-- `block-model.md` is the implementation spec: anatomy, container mapping, command surface, plugin extension, reactivity, and the Effect-TS `SubscriptionRef` UI-state role ([ADR 0007](./0007-ui-state-effect-over-valtio.md)).
+- `block-model.md` is the implementation spec: anatomy, container mapping, command surface, plugin extension, reactivity, and the Effect-TS `SubscriptionRef` UI-state role ([ADR 0006](./0006-ui-state-effect-over-valtio.md)).
 - `architecture.md` §5 (plugin architecture): plugins register block kinds and marks against a typed schema.
 - `comparison.md`: positioning is "Notion-style block editor, scoped to docs only."
 

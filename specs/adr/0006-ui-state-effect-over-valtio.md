@@ -1,7 +1,8 @@
-# ADR 0007 — UI State Store: Effect-TS `SubscriptionRef` over Valtio
+# ADR 0006 — UI State Store: Effect-TS `SubscriptionRef` over Valtio
 
 - **Status:** Accepted
 - **Date:** 2026-05-17
+- **Renumbered:** 2026-05-18 — was ADR 0007; became 0006 when the former ADR 0005 (trust model) and ADR 0006 (AI agent threat model) were merged into [ADR 0005](./0005-trust-model.md).
 - **Supersedes:** PRD decision D4 (was "Valtio holds UI-only state, never document state")
 - **Relates to:** [`block-model.md` §6](../block-model.md), [`architecture.md` §3, §4](../architecture.md), [ADR 0001](./0001-adopt-loro-over-yjs.md), [ADR 0003](./0003-concurrent-semantics-no-global-rw-aw.md)
 

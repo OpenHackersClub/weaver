@@ -154,7 +154,7 @@ Reads validate at the boundary; writes only commit via typed mutators, framed by
 | UI ephemeral (toolbar open, AI panel) | Effect-TS `SubscriptionRef` (via `EditorUiStore` / `BlockUiStore`) | `Stream.changes` bridged into React via `useSubscriptionRef` |
 | Presence / awareness | Loro `EphemeralStore` | Ephemeral subscribe |
 
-**Hard rule:** the UI store never holds document data. If it's persisted or synced, it's in LoroDoc. See [ADR 0007](adr/0007-ui-state-effect-over-valtio.md) for why UI state lives in Effect-TS, not Valtio.
+**Hard rule:** the UI store never holds document data. If it's persisted or synced, it's in LoroDoc. See [ADR 0006](adr/0006-ui-state-effect-over-valtio.md) for why UI state lives in Effect-TS, not Valtio.
 
 For the full treatment of how blocks live across these layers — Loro container shape, typed `Block<K>` selectors, React hook API, `SubscriptionRef` shape, and the worked examples that separate document state from per-viewer UI state — see [`block-model.md`](block-model.md).
 
@@ -190,7 +190,7 @@ Loro diff events fire **once per commit** by design (batched), not per individua
 | Sync orchestration | Reconnect, backoff, conflict observation, offline queueing |
 | Persistence | OPFS + R2 snapshot policies as composable layers |
 | Telemetry | Spans across user → LoroDoc → WS → peer |
-| UI ephemeral state | `SubscriptionRef` for observable cells, `Match.tag` for menus/panels/modals as state machines, `Layer` for store composition and per-route/per-test injection. See [ADR 0007](adr/0007-ui-state-effect-over-valtio.md). |
+| UI ephemeral state | `SubscriptionRef` for observable cells, `Match.tag` for menus/panels/modals as state machines, `Layer` for store composition and per-route/per-test injection. See [ADR 0006](adr/0006-ui-state-effect-over-valtio.md). |
 
 ### Don't use it for
 
@@ -271,7 +271,7 @@ Full treatment in [`access-control.md`](access-control.md).
 |---|---|---|---|
 | Single source of truth | LoroDoc only | Loose schema; CRDT perf concerns at extreme scale | Effect Schema layer; Loro raises the ceiling; subdoc partitioning |
 | Effect-TS everywhere vs. boundaries | Boundaries only | Some inconsistency in style across layers | Hot path documented as "imperative on purpose" |
-| Separate UI-state library vs. one effects model | Effect-TS `SubscriptionRef` for UI state too ([ADR 0007](adr/0007-ui-state-effect-over-valtio.md)) | More ceremony than Valtio's "mutate the proxy"; per-event Fiber overhead on hover/drag | One mental model in the boundary layer; tagged-union state machines; Layer injection for tests |
+| Separate UI-state library vs. one effects model | Effect-TS `SubscriptionRef` for UI state too ([ADR 0006](adr/0006-ui-state-effect-over-valtio.md)) | More ceremony than Valtio's "mutate the proxy"; per-event Fiber overhead on hover/drag | One mental model in the boundary layer; tagged-union state machines; Layer injection for tests |
 | React-managed surface vs. imperative DOM | Imperative | More plumbing | Same pattern as every serious editor |
 | Y.js (mature ecosystem) vs. Loro (better model, less ecosystem) | **Loro** ([ADR 0001](adr/0001-adopt-loro-over-yjs.md)) | Smaller community; can't reuse y-websocket / y-indexeddb; younger codebase | Thin adapter contains the Loro surface; property tests; sync transport was bespoke regardless |
 | Op-level read filtering vs. subdoc partitioning | Subdoc partitioning | Cross-subdoc references need design | Container ID placeholders |

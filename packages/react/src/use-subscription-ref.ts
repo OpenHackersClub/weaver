@@ -2,7 +2,7 @@ import { useCallback, useSyncExternalStore } from "react";
 import { Effect, Fiber, Ref, Stream, SubscriptionRef } from "effect";
 
 /**
- * Bridge an Effect-TS `SubscriptionRef<T>` into a React component. See ADR 0007.
+ * Bridge an Effect-TS `SubscriptionRef<T>` into a React component. See ADR 0006.
  *
  * The `select`/`eq` pair narrows the cell so React only re-renders when the
  * selected slice actually changes.
