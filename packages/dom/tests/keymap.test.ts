@@ -165,6 +165,154 @@ describe("@weaver/dom / Option+Backspace (deleteWordBackward)", () => {
   });
 });
 
+describe("@weaver/dom / Option+Delete (deleteWordForward)", () => {
+  it("from offset 0 deletes the leading word", () => {
+    f.type("hello world");
+    const block = f.blockEls()[0]!;
+    const text = block.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 0);
+    const sel = document.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    f.press("deleteWordForward");
+    expect(f.blockTexts()).toEqual([" world"]);
+  });
+
+  it("a second press from offset 0 consumes the leading space and next word", () => {
+    f.type("hello world");
+    const block = f.blockEls()[0]!;
+    const text = block.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 0);
+    const sel = document.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    f.press("deleteWordForward");
+    f.press("deleteWordForward");
+    expect(f.blockTexts()).toEqual([""]);
+  });
+});
+
+describe("@weaver/dom / Cmd+Backspace (deleteSoftLineBackward)", () => {
+  it("deletes to the start of the block when there is no soft break", () => {
+    f.type("hello world");
+    f.press("deleteSoftLineBackward");
+    expect(f.blockTexts()).toEqual([""]);
+  });
+
+  it("only deletes the current line when soft line breaks are present", () => {
+    f.type("alpha");
+    f.press("insertLineBreak");
+    f.type("beta");
+    // Caret is at end after `type()`.
+    f.press("deleteSoftLineBackward");
+    expect(f.blockTexts()).toEqual(["alpha\n"]);
+  });
+
+  it("a second press removes the soft break (falls through to char-backspace)", () => {
+    f.type("alpha");
+    f.press("insertLineBreak");
+    f.type("beta");
+    f.press("deleteSoftLineBackward");
+    // Now `alpha\n` with caret at end. Char-backspace removes the `\n`.
+    f.press("deleteSoftLineBackward");
+    expect(f.blockTexts()).toEqual(["alpha"]);
+  });
+
+  it("`deleteHardLineBackward` follows the same handler", () => {
+    f.type("hello world");
+    f.press("deleteHardLineBackward");
+    expect(f.blockTexts()).toEqual([""]);
+  });
+});
+
+describe("@weaver/dom / Ctrl+K (deleteSoftLineForward)", () => {
+  it("from offset 0 deletes to the next soft line break", () => {
+    f.type("alpha");
+    f.press("insertLineBreak");
+    f.type("beta");
+    const block = f.blockEls()[0]!;
+    const text = block.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 0);
+    const sel = document.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    f.press("deleteSoftLineForward");
+    expect(f.blockTexts()).toEqual(["\nbeta"]);
+  });
+
+  it("with no trailing newline deletes to the end of the block", () => {
+    f.type("hello");
+    const block = f.blockEls()[0]!;
+    const text = block.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 0);
+    const sel = document.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    f.press("deleteSoftLineForward");
+    expect(f.blockTexts()).toEqual([""]);
+  });
+});
+
+describe("@weaver/dom / Cmd+X (deleteByCut) and drag-out (deleteByDrag)", () => {
+  it("deleteByCut removes the selected range from the block", () => {
+    f.type("hello");
+    const block = f.blockEls()[0]!;
+    const text = block.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 1);
+    range.setEnd(text, 4);
+    const sel = document.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    f.press("deleteByCut");
+    expect(f.blockTexts()).toEqual(["ho"]);
+  });
+
+  it("deleteByDrag removes the source-side range", () => {
+    f.type("hello");
+    const block = f.blockEls()[0]!;
+    const text = block.firstChild as Text;
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 3);
+    const sel = document.getSelection()!;
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    f.press("deleteByDrag");
+    expect(f.blockTexts()).toEqual(["lo"]);
+  });
+});
+
+describe("@weaver/dom / Safari history beforeinput", () => {
+  it("historyUndo undoes the last typing batch", () => {
+    f.type("hello");
+    f.press("historyUndo");
+    expect(f.blockTexts()).toEqual([""]);
+  });
+
+  it("historyRedo redoes after an undo", () => {
+    f.type("hello");
+    f.press("historyUndo");
+    expect(f.blockTexts()).toEqual([""]);
+    f.press("historyRedo");
+    expect(f.blockTexts()).toEqual(["hello"]);
+  });
+});
+
 describe("@weaver/dom / formatting via Ctrl+B / Ctrl+I / Ctrl+U", () => {
   it("Ctrl+B over a selection toggles bold on the LoroDoc text", () => {
     f.type("hello");

@@ -282,6 +282,41 @@ export const handleWordBackspace = (
   return handleBackspace(editor, caret);
 };
 
+/**
+ * Line-backwards delete target — start of the current logical line inside the
+ * block. Soft line breaks are represented as inline `\n` in the block's text
+ * (see `handleInsertLineBreak`), so "start of line" = position right after
+ * the most recent `\n` before the caret, or 0 if there is none.
+ */
+const lineBackwardOffset = (text: string, offset: number): number => {
+  const i = Math.min(offset, text.length);
+  const slice = text.slice(0, i);
+  const lastNewline = slice.lastIndexOf("\n");
+  return lastNewline < 0 ? 0 : lastNewline + 1;
+};
+
+export const handleLineBackspace = (
+  editor: Editor,
+  caret: DomCaret,
+): ApplyResult | null => {
+  if (caret.offset > 0) {
+    const text = editor.commands.text.read(caret.blockId);
+    const target = lineBackwardOffset(text, caret.offset);
+    if (target < caret.offset) {
+      editor.commands.text.delete({
+        blockId: caret.blockId,
+        offset: target,
+        length: caret.offset - target,
+      });
+      return { caret: { blockId: caret.blockId, offset: target } };
+    }
+  }
+  // At offset 0 — or right after a `\n` with nothing to delete on the current
+  // line — defer to char-backspace so block-merge / heading-demote / soft-break
+  // removal still works.
+  return handleBackspace(editor, caret);
+};
+
 export const handleDeleteForward = (
   editor: Editor,
   caret: DomCaret,
@@ -299,6 +334,59 @@ export const handleDeleteForward = (
   if (!next) return null;
   editor.commands.block.merge({ prevId: caret.blockId, nextId: next });
   return { caret };
+};
+
+/** Symmetric forward counterpart of `wordBackwardOffset`. */
+const wordForwardOffset = (text: string, offset: number): number => {
+  let i = Math.max(0, Math.min(offset, text.length));
+  while (i < text.length && isWhitespace(text[i] ?? "")) i++;
+  while (i < text.length && !isWhitespace(text[i] ?? "")) i++;
+  return i;
+};
+
+export const handleWordDeleteForward = (
+  editor: Editor,
+  caret: DomCaret,
+): ApplyResult | null => {
+  const text = editor.commands.text.read(caret.blockId);
+  if (caret.offset < text.length) {
+    const target = wordForwardOffset(text, caret.offset);
+    if (target > caret.offset) {
+      editor.commands.text.delete({
+        blockId: caret.blockId,
+        offset: caret.offset,
+        length: target - caret.offset,
+      });
+      return { caret };
+    }
+  }
+  return handleDeleteForward(editor, caret);
+};
+
+/** Forward counterpart of `lineBackwardOffset`. */
+const lineForwardOffset = (text: string, offset: number): number => {
+  const start = Math.max(0, Math.min(offset, text.length));
+  const idx = text.indexOf("\n", start);
+  return idx < 0 ? text.length : idx;
+};
+
+export const handleLineDeleteForward = (
+  editor: Editor,
+  caret: DomCaret,
+): ApplyResult | null => {
+  const text = editor.commands.text.read(caret.blockId);
+  if (caret.offset < text.length) {
+    const target = lineForwardOffset(text, caret.offset);
+    if (target > caret.offset) {
+      editor.commands.text.delete({
+        blockId: caret.blockId,
+        offset: caret.offset,
+        length: target - caret.offset,
+      });
+      return { caret };
+    }
+  }
+  return handleDeleteForward(editor, caret);
 };
 
 interface MarkSegment {
