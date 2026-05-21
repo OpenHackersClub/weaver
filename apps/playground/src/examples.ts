@@ -4,6 +4,7 @@ import {
   getChildren,
   rootId,
 } from "@weaver/core";
+import { Match } from "effect";
 
 export type ExampleId = "empty" | "demo" | "multi" | "agent";
 
@@ -95,10 +96,11 @@ const replaceFirstBlock = (
 
 export const seedExample = (editor: Editor, id: ExampleId): void => {
   clearAllBlocks(editor);
-  switch (id) {
-    case "empty":
-      return;
-    case "demo": {
+  Match.value(id).pipe(
+    Match.when("empty", () => {
+      /* clearAllBlocks already left the blank-paragraph template */
+    }),
+    Match.when("demo", () => {
       replaceFirstBlock(editor, "heading", { level: 1 }, "Welcome to weaver");
       seedBlock(
         editor,
@@ -124,16 +126,14 @@ export const seedExample = (editor: Editor, id: ExampleId): void => {
         {},
         "Lists, code blocks, tables, embeds, suggestion mode, comments, AI agent peers, sync, and access control all live in specs/ and adr/ and are next on the roadmap.",
       );
-      return;
-    }
-    case "multi": {
+    }),
+    Match.when("multi", () => {
       replaceFirstBlock(editor, "paragraph", {}, "Paragraph one — try clicking here and typing.");
       for (let i = 2; i <= 6; i++) {
         seedBlock(editor, i - 1, "paragraph", {}, `Paragraph ${i}.`);
       }
-      return;
-    }
-    case "agent": {
+    }),
+    Match.when("agent", () => {
       replaceFirstBlock(editor, "heading", { level: 1 }, "Agent collaboration demo");
       seedBlock(
         editor,
@@ -149,7 +149,7 @@ export const seedExample = (editor: Editor, id: ExampleId): void => {
         {},
         "Keep typing here while an agent streams below — Loro merges the concurrent edits and your caret never jumps.",
       );
-      return;
-    }
-  }
+    }),
+    Match.exhaustive,
+  );
 };

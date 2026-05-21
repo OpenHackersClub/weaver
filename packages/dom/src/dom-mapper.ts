@@ -1,28 +1,31 @@
 import type { Block, BlockId, BlockKind, Editor } from "@weaver/core";
 import { getBlock, getChildren, rootId } from "@weaver/core";
+import { Match } from "effect";
 
 const BLOCK_ATTR = "data-block-id";
 const KIND_ATTR = "data-kind";
 const LEVEL_ATTR = "data-level";
 
-export const tagFor = (kind: BlockKind, level?: number): string => {
-  switch (kind) {
-    case "heading":
-      return `h${Math.max(1, Math.min(6, level ?? 1))}`;
-    case "quote":
-      return "blockquote";
-    case "bullet-list-item":
-    case "numbered-list-item":
-    case "to-do":
-      return "li";
-    case "code":
-      return "pre";
-    case "divider":
-      return "hr";
-    default:
-      return "p";
-  }
-};
+// `paragraph`, `image`, `embed`, `toggle`, and the `table` family fall
+// through to `<p>` today — they still need dedicated DOM mapping (tracked
+// against `specs/lexical-parity.md` §1). `Match.orElse` makes that pending
+// work visible without losing the structural mapping for the kinds we do
+// render: when each kind gets a real branch the `orElse` can switch to
+// `Match.exhaustive` and the compiler will hold us to it.
+export const tagFor = (kind: BlockKind, level?: number): string =>
+  Match.value(kind).pipe(
+    Match.when("heading", () => `h${Math.max(1, Math.min(6, level ?? 1))}`),
+    Match.when("quote", () => "blockquote"),
+    Match.whenOr(
+      "bullet-list-item",
+      "numbered-list-item",
+      "to-do",
+      () => "li",
+    ),
+    Match.when("code", () => "pre"),
+    Match.when("divider", () => "hr"),
+    Match.orElse(() => "p"),
+  );
 
 export const blockClassFor = (kind: BlockKind): string => `weaver-block weaver-${kind}`;
 

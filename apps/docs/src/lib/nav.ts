@@ -78,6 +78,11 @@ export const nav: NavSection[] = [
         blurb: "Catalog of Lexical features mapped to weaver primitives, with the v1 outcome rubric.",
       },
       {
+        slug: "implementation-guideline",
+        label: "Implementation Guideline",
+        blurb: "Effect-TS pattern matching, tagged errors, state ownership — the code-level conventions a reviewer can block on.",
+      },
+      {
         slug: "benchmarks",
         label: "Benchmarks",
         blurb: "What we measure, how, the v1 pass bars, and the outcome rubric.",
