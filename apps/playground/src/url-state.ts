@@ -1,7 +1,7 @@
 import { EXAMPLES, type ExampleId } from "./examples.js";
 import { MAX_AGENTS } from "./agents/runtime.js";
 
-export type DebugPanelId = "tree" | "ops" | "vv";
+export type DebugPanelId = "tree" | "ops" | "vv" | "fps";
 
 export interface UrlState {
   readonly example: ExampleId;
@@ -11,7 +11,7 @@ export interface UrlState {
   readonly agents: number;
 }
 
-const ALL_DEBUG: ReadonlySet<DebugPanelId> = new Set(["tree", "ops", "vv"]);
+const ALL_DEBUG: ReadonlySet<DebugPanelId> = new Set(["tree", "ops", "vv", "fps"]);
 const DEFAULT_EXAMPLE: ExampleId = "demo";
 
 export const readUrlState = (search: string): UrlState => {

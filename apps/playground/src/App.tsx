@@ -8,7 +8,7 @@ import { createRuntime } from "./agents/runtime.js";
 import { AgentsPanel } from "./agents/agents-panel.js";
 import { PresenceLayer } from "./agents/presence-layer.js";
 
-const ALL_DEBUG_PANELS: ReadonlyArray<DebugPanelId> = ["tree", "ops", "vv"];
+const ALL_DEBUG_PANELS: ReadonlyArray<DebugPanelId> = ["tree", "ops", "vv", "fps"];
 
 /** Compact recursive view of the block tree — used by acceptance tests to
  *  assert structural nesting (which the flat DOM renderer can't reveal). */
