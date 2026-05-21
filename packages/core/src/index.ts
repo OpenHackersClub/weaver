@@ -15,6 +15,12 @@ export {
   TodoAttrs,
   CodeAttrs,
   DividerAttrs,
+  ImageAttrs,
+  EmbedAttrs,
+  ToggleAttrs,
+  TableAttrs,
+  TableRowAttrs,
+  TableCellAttrs,
   blockKindHasInline,
   defaultAttrsFor,
 } from "./block.js";

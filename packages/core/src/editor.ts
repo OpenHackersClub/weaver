@@ -40,6 +40,10 @@ const DEFAULT_TEXT_STYLES = {
   // (specs/ai-agent.md §5 — the marker pattern). The mark VALUE is the agent
   // id string (e.g. "agent-1").
   "agent-pending": { expand: "after" as const },
+  // Mention spans are atomic from a typing-cursor standpoint; an insert at
+  // either edge should NOT extend the mark (Lexical's TypeaheadMenuPlugin
+  // mention nodes behave the same way).
+  mention: { expand: "none" as const },
 };
 
 /** Every mark key the editor knows about — used to clear all formatting. */
@@ -53,7 +57,8 @@ export type MarkKind =
   | "code"
   | "link"
   | "highlight"
-  | "agent-pending";
+  | "agent-pending"
+  | "mention";
 
 export type EditorOrigin = "user" | "agent" | "system" | (string & {});
 
@@ -119,9 +124,20 @@ export interface EditorCommands {
     delete(args: { blockId: BlockId }): void;
     indent(args: { blockId: BlockId }): boolean;
     outdent(args: { blockId: BlockId }): boolean;
+    move(args: {
+      blockId: BlockId;
+      newParentId: BlockId;
+      newIndex: number;
+    }): boolean;
+    setAttr(args: {
+      blockId: BlockId;
+      key: string;
+      value: unknown;
+    }): void;
   };
   readonly text: {
     insert(args: { blockId: BlockId; offset: number; value: string }): void;
+    insertTab(args: { blockId: BlockId; offset: number }): void;
     delete(args: { blockId: BlockId; offset: number; length: number }): void;
     read(blockId: BlockId): string;
     length(blockId: BlockId): number;
@@ -191,6 +207,28 @@ const childIds = (tree: LoroTree, id: BlockId): BlockId[] => {
   const node = getNode(tree, id);
   if (!node) return [];
   return (node.children() ?? []).map((c) => String(c.id));
+};
+
+/**
+ * Whether `candidate` is `ancestor` itself or anywhere in its subtree. Used by
+ * `block.move` to refuse cycle-forming reparents (a node cannot be moved
+ * underneath itself or one of its own descendants).
+ */
+const isSelfOrDescendant = (
+  tree: LoroTree,
+  ancestor: BlockId,
+  candidate: BlockId,
+): boolean => {
+  if (ancestor === candidate) return true;
+  const stack: BlockId[] = [ancestor];
+  while (stack.length > 0) {
+    const cur = stack.pop()!;
+    for (const child of childIds(tree, cur)) {
+      if (child === candidate) return true;
+      stack.push(child);
+    }
+  }
+  return false;
 };
 
 /**
@@ -278,6 +316,20 @@ const validateMarkValue = (mark: MarkKind, value: unknown): void => {
         : (value as { href?: unknown } | undefined)?.href;
     if (typeof href !== "string" || href.length === 0) {
       throw new Error("link mark requires a non-empty `href`");
+    }
+  }
+  if (mark === "mention") {
+    const v = value as { userId?: unknown; label?: unknown } | undefined;
+    if (
+      !v ||
+      typeof v.userId !== "string" ||
+      v.userId.length === 0 ||
+      typeof v.label !== "string" ||
+      v.label.length === 0
+    ) {
+      throw new Error(
+        "mention mark requires `{ userId, label }` with non-empty strings",
+      );
     }
   }
 };
@@ -556,6 +608,46 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
           node.move(grandparent ?? undefined, parentIndex + 1);
           return true;
         }),
+
+      move: ({ blockId, newParentId, newIndex }) =>
+        withOrigin(() => {
+          const node = getNode(tree, blockId);
+          if (!node) return false;
+          // Cannot reparent under self or any descendant — would form a cycle.
+          if (
+            newParentId !== ROOT_ID &&
+            isSelfOrDescendant(tree, blockId, newParentId)
+          ) {
+            return false;
+          }
+          const target =
+            newParentId === ROOT_ID ? undefined : getNode(tree, newParentId);
+          if (newParentId !== ROOT_ID && !target) return false;
+          const siblings = target ? (target.children() ?? []) : tree.roots();
+          // When moving WITHIN the same parent, Loro reorders the existing
+          // child so `newIndex` is the post-move slot in the unchanged-length
+          // sibling list (max index = siblings.length - 1). When moving to a
+          // DIFFERENT parent the slot is in the target's list which grows by
+          // one (max index = siblings.length).
+          const currentParent = node.parent();
+          const sameParent = target
+            ? currentParent?.id === target.id
+            : currentParent === undefined;
+          const maxIndex = sameParent
+            ? Math.max(0, siblings.length - 1)
+            : siblings.length;
+          const clamped = Math.max(0, Math.min(newIndex, maxIndex));
+          node.move(target, clamped);
+          return true;
+        }),
+
+      setAttr: ({ blockId, key, value }) =>
+        withOrigin(() => {
+          const node = getNode(tree, blockId);
+          if (!node) return;
+          const current = getAttrs(node);
+          node.data.set(ATTRS_KEY, { ...current, [key]: value });
+        }),
     },
 
     text: {
@@ -567,6 +659,21 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
           const len = text.length;
           const safeOffset = Math.max(0, Math.min(offset, len));
           text.insert(safeOffset, value);
+        }, true),
+
+      insertTab: ({ blockId, offset }) =>
+        withOrigin(() => {
+          const node = getNode(tree, blockId);
+          if (!node) throw new Error(`block ${blockId} not found`);
+          if (!blockKindHasInline(getKind(node))) {
+            throw new Error(
+              `block ${blockId} (kind ${getKind(node)}) has no inline text`,
+            );
+          }
+          const text = ensureText(node);
+          const len = text.length;
+          const safeOffset = Math.max(0, Math.min(offset, len));
+          text.insert(safeOffset, "\t");
         }, true),
 
       delete: ({ blockId, offset, length }) =>
@@ -784,15 +891,27 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
       }
       for (let i = 1; i < ids.length; i++) {
         const id = ids[i]!;
+        const idNode = getNode(tree, id);
+        const idHasInline = idNode
+          ? blockKindHasInline(getKind(idNode))
+          : false;
         if (id === end.blockId) {
-          if (end.offset > 0) {
+          if (idHasInline && end.offset > 0) {
             commands.text.delete({ blockId: id, offset: 0, length: end.offset });
           }
-        } else {
+        } else if (idHasInline) {
           const l = textLengthOf(id);
           if (l > 0) commands.text.delete({ blockId: id, offset: 0, length: l });
         }
-        commands.block.merge({ prevId: start.blockId, nextId: id });
+        if (idHasInline) {
+          commands.block.merge({ prevId: start.blockId, nextId: id });
+        } else {
+          // Non-inline blocks (divider, image, embed) between endpoints get
+          // deleted outright — `block.merge` would call `requireText` and
+          // throw. The deletion still leaves at least the anchor block, so
+          // the no-empty-root invariant is upheld.
+          commands.block.delete({ blockId: id });
+        }
       }
       if (value) {
         commands.text.insert({

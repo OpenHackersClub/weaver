@@ -12,6 +12,12 @@ export const BlockKindSchema = Schema.Literal(
   "to-do",
   "code",
   "divider",
+  "image",
+  "embed",
+  "toggle",
+  "table",
+  "table-row",
+  "table-cell",
 );
 export type BlockKind = Schema.Schema.Type<typeof BlockKindSchema>;
 
@@ -27,6 +33,28 @@ export const CodeAttrs = Schema.Struct({
   language: Schema.optional(Schema.String),
 });
 export const DividerAttrs = Schema.Struct({});
+export const ImageAttrs = Schema.Struct({
+  src: Schema.String,
+  alt: Schema.optional(Schema.String),
+  caption: Schema.optional(Schema.String),
+  width: Schema.optional(Schema.Number),
+  height: Schema.optional(Schema.Number),
+});
+export const EmbedAttrs = Schema.Struct({
+  provider: Schema.String,
+  url: Schema.String,
+  sandbox: Schema.optional(Schema.Boolean),
+});
+export const ToggleAttrs = Schema.Struct({
+  open: Schema.Boolean,
+});
+export const TableAttrs = Schema.Struct({
+  columns: Schema.optional(Schema.Number),
+});
+export const TableRowAttrs = Schema.Struct({});
+export const TableCellAttrs = Schema.Struct({
+  header: Schema.optional(Schema.Boolean),
+});
 
 export type AttrsFor<K extends BlockKind> = K extends "paragraph"
   ? Schema.Schema.Type<typeof ParagraphAttrs>
@@ -44,7 +72,19 @@ export type AttrsFor<K extends BlockKind> = K extends "paragraph"
               ? Schema.Schema.Type<typeof CodeAttrs>
               : K extends "divider"
                 ? Schema.Schema.Type<typeof DividerAttrs>
-                : never;
+                : K extends "image"
+                  ? Schema.Schema.Type<typeof ImageAttrs>
+                  : K extends "embed"
+                    ? Schema.Schema.Type<typeof EmbedAttrs>
+                    : K extends "toggle"
+                      ? Schema.Schema.Type<typeof ToggleAttrs>
+                      : K extends "table"
+                        ? Schema.Schema.Type<typeof TableAttrs>
+                        : K extends "table-row"
+                          ? Schema.Schema.Type<typeof TableRowAttrs>
+                          : K extends "table-cell"
+                            ? Schema.Schema.Type<typeof TableCellAttrs>
+                            : never;
 
 export type Block<K extends BlockKind = BlockKind> = {
   readonly id: BlockId;
@@ -63,8 +103,14 @@ export const blockKindHasInline = (kind: BlockKind): boolean => {
     case "numbered-list-item":
     case "to-do":
     case "code":
+    case "toggle":
+    case "table-cell":
       return true;
     case "divider":
+    case "image":
+    case "embed":
+    case "table":
+    case "table-row":
       return false;
   }
 };
@@ -86,6 +132,18 @@ export const defaultAttrsFor = <K extends BlockKind>(kind: K): AttrsFor<K> => {
     case "code":
       return {} as AttrsFor<K>;
     case "divider":
+      return {} as AttrsFor<K>;
+    case "image":
+      return { src: "" } as AttrsFor<K>;
+    case "embed":
+      return { provider: "", url: "" } as AttrsFor<K>;
+    case "toggle":
+      return { open: true } as AttrsFor<K>;
+    case "table":
+      return {} as AttrsFor<K>;
+    case "table-row":
+      return {} as AttrsFor<K>;
+    case "table-cell":
       return {} as AttrsFor<K>;
   }
   return {} as AttrsFor<K>;
