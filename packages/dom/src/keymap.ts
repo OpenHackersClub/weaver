@@ -1,5 +1,6 @@
 import type { BlockId, BlockKind, Editor } from "@weaver/core";
 import { getBlock, getChildren, rootId } from "@weaver/core";
+import { Match } from "effect";
 import {
   type DomCaret,
   type DomRange,
@@ -507,9 +508,26 @@ export const handleClearFormatting = (
 };
 
 export const isParagraphLike = (kind: BlockKind): boolean =>
-  kind === "paragraph" ||
-  kind === "heading" ||
-  kind === "quote" ||
-  kind === "bullet-list-item" ||
-  kind === "numbered-list-item" ||
-  kind === "to-do";
+  Match.value(kind).pipe(
+    Match.whenOr(
+      "paragraph",
+      "heading",
+      "quote",
+      "bullet-list-item",
+      "numbered-list-item",
+      "to-do",
+      () => true,
+    ),
+    Match.whenOr(
+      "code",
+      "divider",
+      "image",
+      "embed",
+      "toggle",
+      "table",
+      "table-row",
+      "table-cell",
+      () => false,
+    ),
+    Match.exhaustive,
+  );
