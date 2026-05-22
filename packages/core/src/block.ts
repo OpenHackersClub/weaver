@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Match, Schema } from "effect";
 
 export type BlockId = string;
 export const ROOT_ID: BlockId = "__root__";
@@ -94,57 +94,49 @@ export type Block<K extends BlockKind = BlockKind> = {
   readonly childIds: ReadonlyArray<BlockId>;
 };
 
-export const blockKindHasInline = (kind: BlockKind): boolean => {
-  switch (kind) {
-    case "paragraph":
-    case "heading":
-    case "quote":
-    case "bullet-list-item":
-    case "numbered-list-item":
-    case "to-do":
-    case "code":
-    case "toggle":
-    case "table-cell":
-      return true;
-    case "divider":
-    case "image":
-    case "embed":
-    case "table":
-    case "table-row":
-      return false;
-  }
-};
+export const blockKindHasInline = (kind: BlockKind): boolean =>
+  Match.value(kind).pipe(
+    Match.whenOr(
+      "paragraph",
+      "heading",
+      "quote",
+      "bullet-list-item",
+      "numbered-list-item",
+      "to-do",
+      "code",
+      "toggle",
+      "table-cell",
+      () => true,
+    ),
+    Match.whenOr(
+      "divider",
+      "image",
+      "embed",
+      "table",
+      "table-row",
+      () => false,
+    ),
+    Match.exhaustive,
+  );
 
-export const defaultAttrsFor = <K extends BlockKind>(kind: K): AttrsFor<K> => {
-  switch (kind) {
-    case "paragraph":
-      return {} as AttrsFor<K>;
-    case "heading":
-      return { level: 1 } as AttrsFor<K>;
-    case "quote":
-      return {} as AttrsFor<K>;
-    case "bullet-list-item":
-      return {} as AttrsFor<K>;
-    case "numbered-list-item":
-      return {} as AttrsFor<K>;
-    case "to-do":
-      return { checked: false } as AttrsFor<K>;
-    case "code":
-      return {} as AttrsFor<K>;
-    case "divider":
-      return {} as AttrsFor<K>;
-    case "image":
-      return { src: "" } as AttrsFor<K>;
-    case "embed":
-      return { provider: "", url: "" } as AttrsFor<K>;
-    case "toggle":
-      return { open: true } as AttrsFor<K>;
-    case "table":
-      return {} as AttrsFor<K>;
-    case "table-row":
-      return {} as AttrsFor<K>;
-    case "table-cell":
-      return {} as AttrsFor<K>;
-  }
-  return {} as AttrsFor<K>;
-};
+export const defaultAttrsFor = <K extends BlockKind>(kind: K): AttrsFor<K> =>
+  Match.value(kind as BlockKind).pipe(
+    Match.when("heading", () => ({ level: 1 }) as AttrsFor<K>),
+    Match.when("to-do", () => ({ checked: false }) as AttrsFor<K>),
+    Match.when("image", () => ({ src: "" }) as AttrsFor<K>),
+    Match.when("embed", () => ({ provider: "", url: "" }) as AttrsFor<K>),
+    Match.when("toggle", () => ({ open: true }) as AttrsFor<K>),
+    Match.whenOr(
+      "paragraph",
+      "quote",
+      "bullet-list-item",
+      "numbered-list-item",
+      "code",
+      "divider",
+      "table",
+      "table-row",
+      "table-cell",
+      () => ({}) as AttrsFor<K>,
+    ),
+    Match.exhaustive,
+  );
