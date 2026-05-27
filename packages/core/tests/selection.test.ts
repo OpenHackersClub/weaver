@@ -180,4 +180,33 @@ describe("@weaver/core / selection — mutating commands", () => {
     expect(getChildren(editor, rootId(editor))).toHaveLength(1);
     editor.dispose();
   });
+
+  it("insertText on a multi-block range whose start block is a divider throws — B6 guard", () => {
+    // When orderEndpoints picks a non-inline block (divider) as the start
+    // of the range, mutateSelectionRange calls text.insert on that block
+    // which must throw rather than silently creating text content.
+    const editor = createEditor({ seed: false });
+    const root = rootId(editor);
+    const dividerId = editor.commands.block.insert({
+      parentId: root,
+      index: 0,
+      kind: "divider",
+    });
+    const paraId = editor.commands.block.insert({
+      parentId: root,
+      index: 1,
+      kind: "paragraph",
+    });
+    editor.commands.text.insert({ blockId: paraId, offset: 0, value: "text" });
+    // Forward selection: divider (offset 0) -> paragraph (offset 2)
+    // orderEndpoints keeps anchor=divider as start — it's first in doc order.
+    future(editor).commands.selection.set({
+      anchor: { blockId: dividerId, offset: 0 },
+      focus: { blockId: paraId, offset: 2 },
+    });
+    expect(() =>
+      future(editor).commands.selection.insertText("X"),
+    ).toThrow(/no inline text/);
+    editor.dispose();
+  });
 });

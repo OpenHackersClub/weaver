@@ -673,6 +673,11 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
         withOrigin(() => {
           const node = getNode(tree, blockId);
           if (!node) throw new Error(`block ${blockId} not found`);
+          if (!blockKindHasInline(getKind(node))) {
+            throw new Error(
+              `block ${blockId} (kind ${getKind(node)}) has no inline text`,
+            );
+          }
           const text = ensureText(node);
           const len = text.length;
           const safeOffset = Math.max(0, Math.min(offset, len));
