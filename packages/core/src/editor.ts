@@ -50,6 +50,21 @@ const DEFAULT_TEXT_STYLES = {
 /** Every mark key the editor knows about — used to clear all formatting. */
 const MARK_KEYS = Object.keys(DEFAULT_TEXT_STYLES);
 
+/** Marks whose Loro text-style `expand` is "after" — inserting at the trailing
+ *  edge of these marks causes the new text to inherit the mark. Used by
+ *  `block.merge` to prevent bleeding across block boundaries.
+ *
+ *  NOTE: Loro's default `expand` for an unconfigured style key is `"after"`,
+ *  so a mark key *not* in `DEFAULT_TEXT_STYLES` would still bleed. Every mark
+ *  the editor applies is configured in `DEFAULT_TEXT_STYLES`, so this is
+ *  theoretical — but a future custom mark added without configuring its expand
+ *  value would silently escape this filter. */
+const EXPAND_AFTER_MARKS = new Set(
+  Object.entries(DEFAULT_TEXT_STYLES)
+    .filter(([, v]) => v.expand === "after")
+    .map(([k]) => k),
+);
+
 export type MarkKind =
   | "bold"
   | "italic"
@@ -562,7 +577,9 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
             const prevDelta = prevText.toDelta() as DeltaRun[];
             const lastRun = prevDelta[prevDelta.length - 1];
             const bleedKeys = lastRun?.attributes
-              ? Object.keys(lastRun.attributes)
+              ? Object.keys(lastRun.attributes).filter((k) =>
+                  EXPAND_AFTER_MARKS.has(k),
+                )
               : [];
             prevText.insert(base, tail);
             for (const key of bleedKeys) {

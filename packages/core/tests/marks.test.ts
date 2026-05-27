@@ -384,4 +384,40 @@ describe("@weaver/core / marks — preservation across structural ops", () => {
     ]);
     editor.dispose();
   });
+
+  it("block.merge only prevents expand:after marks from bleeding — expand:none marks are untouched", () => {
+    // Regression for B4: bleedKeys filter must only strip expand:after marks
+    // (bold, italic, etc.) from the merge region. expand:none marks (code,
+    // link, mention) must NOT be unmarked — they can't bleed on insert.
+    const { editor, id: firstId } = seedBlockWithText("bold");
+    // First char: bold (expand:after). Last char: code (expand:none).
+    editor.commands.text.toggleMark({
+      blockId: firstId,
+      range: { start: 0, end: 2 },
+      mark: "bold",
+    });
+    editor.commands.text.toggleMark({
+      blockId: firstId,
+      range: { start: 2, end: 4 },
+      mark: "code",
+    });
+    const secondId = editor.commands.block.insert({
+      parentId: rootId(editor),
+      index: 1,
+      kind: "paragraph",
+      attrs: {},
+    });
+    editor.commands.text.insert({ blockId: secondId, offset: 0, value: " XY" });
+    editor.commands.block.merge({ prevId: firstId, nextId: secondId });
+    const delta = readDelta(editor, firstId);
+    // "bo" bold | "ld" code | " XY" plain
+    // Bold must NOT bleed into "ld" or " XY" (unmarked from merge region).
+    // Code must still cover "ld" (must NOT be unmarked — it's expand:none).
+    expect(delta).toEqual([
+      { insert: "bo", attributes: { bold: true } },
+      { insert: "ld", attributes: { code: true } },
+      { insert: " XY" },
+    ]);
+    editor.dispose();
+  });
 });
