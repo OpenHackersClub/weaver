@@ -1,5 +1,6 @@
 import {
   LoroDoc,
+  LoroMap,
   LoroText,
   LoroTree,
   LoroTreeNode,
@@ -196,8 +197,15 @@ const getKind = (node: LoroTreeNode): BlockKind => {
 };
 
 const getAttrs = (node: LoroTreeNode): Record<string, unknown> => {
-  const a = node.data.get(ATTRS_KEY) as Record<string, unknown> | undefined;
-  return a ?? {};
+  const v = node.data.get(ATTRS_KEY);
+  if (v instanceof LoroMap) {
+    return v.toJSON() as Record<string, unknown>;
+  }
+  // Backwards compat: handle plain-object storage (pre-LoroMap format).
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    return v as Record<string, unknown>;
+  }
+  return {};
 };
 
 const childIds = (tree: LoroTree, id: BlockId): BlockId[] => {
@@ -381,7 +389,10 @@ const setKindAttrs = (
 ): void => {
   node.data.set(KIND_KEY, kind);
   if (attrs !== undefined) {
-    node.data.set(ATTRS_KEY, { ...attrs });
+    const m = node.data.setContainer(ATTRS_KEY, new LoroMap());
+    for (const [k, v] of Object.entries(attrs)) {
+      m.set(k, v);
+    }
   }
 };
 
@@ -645,8 +656,15 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
         withOrigin(() => {
           const node = getNode(tree, blockId);
           if (!node) return;
-          const current = getAttrs(node);
-          node.data.set(ATTRS_KEY, { ...current, [key]: value });
+          const v = node.data.get(ATTRS_KEY);
+          // get-or-create the LoroMap container. Two peers calling setAttr on
+          // a block with no attrs container yet will each race to
+          // setContainer() — Loro ensures one wins and the other sees the
+          // winner's container, so the per-key .set() below converges.
+          const m = v instanceof LoroMap
+            ? v
+            : node.data.setContainer(ATTRS_KEY, new LoroMap());
+          m.set(key, value);
         }),
     },
 
