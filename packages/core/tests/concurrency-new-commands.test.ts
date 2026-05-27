@@ -38,7 +38,7 @@ describe("@weaver/core / concurrency / block.setAttr", () => {
     b.dispose();
   });
 
-  it("setAttr on different keys both survive — last-write per key", () => {
+  it("setAttr on different keys both survive — per-key LWW convergence", () => {
     const a = createEditor({ origin: "user" });
     const b = createEditor({ origin: "agent", seed: false });
     syncBoth(a, b);
@@ -46,12 +46,10 @@ describe("@weaver/core / concurrency / block.setAttr", () => {
     a.commands.block.setAttr({ blockId: aId, key: "align", value: "center" });
     b.commands.block.setAttr({ blockId: aId, key: "color", value: "red" });
     syncBoth(a, b);
-    // Loro's LWW container map merges per-key — both keys should survive.
-    // (Worth-noting caveat: writes to `attrs` are full-object replacements,
-    // so simultaneous writes to *different* keys may stomp each other.
-    // This test pins the current behavior so a future move to a per-key
-    // LoroMap shows up as a deliberate behavior change.)
+    // attrs are stored in a per-key LoroMap container; concurrent writes
+    // to different keys converge with both values surviving (ADR 0003).
     const merged = getBlock(a, aId)?.attrs as Record<string, unknown>;
+    expect(merged).toMatchObject({ align: "center", color: "red" });
     expect(getBlock(b, aId)?.attrs).toEqual(merged);
     a.dispose();
     b.dispose();
