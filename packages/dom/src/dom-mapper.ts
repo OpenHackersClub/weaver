@@ -91,6 +91,17 @@ export const wrapWithMarks = (
     m.appendChild(node);
     node = m;
   }
+  if (attrs["mention"]) {
+    const span = doc.createElement("span");
+    span.className = "weaver-mention";
+    const val = attrs["mention"] as
+      | { userId?: string; label?: string }
+      | undefined;
+    if (val?.userId) span.setAttribute("data-mention-user-id", val.userId);
+    if (val?.label) span.setAttribute("data-mention-label", val.label);
+    span.appendChild(node);
+    node = span;
+  }
   if (attrs["agent-pending"]) {
     const span = doc.createElement("span");
     span.className = "weaver-agent-pending";
@@ -245,8 +256,18 @@ const updateBlockElement = (
   return el;
 };
 
-export const reconcileTopLevel = (editor: Editor, host: HTMLElement): void => {
-  const desired = getChildren(editor, rootId(editor));
+/**
+ * Recursively render a block and its children into `host`, preserving
+ * element identity on re-render (fast path for single-keystroke reconciles).
+ * Nested child blocks are rendered as flat siblings under host so the DOM
+ * always reflects document order — even for indented/nested blocks.
+ */
+const reconcileChildren = (
+  editor: Editor,
+  host: HTMLElement,
+  parentId: BlockId,
+): void => {
+  const desired = getChildren(editor, parentId);
   const present = new Map<BlockId, HTMLElement>();
   for (const child of Array.from(host.children)) {
     const id = (child as HTMLElement).getAttribute(BLOCK_ATTR);
@@ -274,6 +295,10 @@ export const reconcileTopLevel = (editor: Editor, host: HTMLElement): void => {
   for (const [id, el] of present) {
     if (!desired.includes(id)) el.remove();
   }
+};
+
+export const reconcileTopLevel = (editor: Editor, host: HTMLElement): void => {
+  reconcileChildren(editor, host, rootId(editor));
 };
 
 export const findBlockElement = (host: HTMLElement, blockId: BlockId): HTMLElement | null =>
