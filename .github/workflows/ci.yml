@@ -47,8 +47,14 @@ jobs:
       - name: Typecheck @weaver/react
         run: pnpm --filter @weaver/react typecheck
 
+      - name: Typecheck @weaver/sync
+        run: pnpm --filter @weaver/sync typecheck
+
       - name: Unit tests — @weaver/core
         run: pnpm --filter @weaver/core test
+
+      - name: Unit tests — @weaver/sync
+        run: pnpm --filter @weaver/sync test
 
       - name: Build playground SPA
         run: pnpm --filter @weaver/playground build
