@@ -7,3 +7,10 @@ export {
   useDocSnapshot,
 } from "./use-editor.js";
 export { useSubscriptionRef } from "./use-subscription-ref.js";
+export {
+  MentionMenu,
+  useMentions,
+  type MentionMenuProps,
+  type MentionsApi,
+  type UseMentionsOptions,
+} from "./mentions.js";

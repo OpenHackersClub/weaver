@@ -39,6 +39,19 @@ export {
   type SelectionRange,
   type MarkKind,
 } from "./editor.js";
+export type {
+  Principal,
+  PrincipalKind,
+  MentionMarkValue,
+} from "./principal.js";
+export {
+  createEditorEventHub,
+  type EditorEvent,
+  type EditorEventHub,
+  type EditorEventSubscribeOptions,
+  type EditorEventTag,
+  type MentionCreatedEvent,
+} from "./events.js";
 export { connectPeers, type PeerLink } from "./peer-link.js";
 export {
   createPresenceHub,

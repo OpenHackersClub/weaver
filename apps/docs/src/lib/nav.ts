@@ -62,6 +62,11 @@ export const nav: NavSection[] = [
         blurb: "Peer model, streaming, tools, multi-agent.",
       },
       {
+        slug: "mentions",
+        label: "Mentions",
+        blurb: "Tagging principals (people and agents) in-document: trigger UX, mention mark, debounced MentionCreated events.",
+      },
+      {
         slug: "access-control",
         label: "Access Control",
         blurb: "Tokens, schemas, op validation, audit, threat model, gaps.",

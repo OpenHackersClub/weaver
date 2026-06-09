@@ -16,6 +16,8 @@ import {
   blockKindHasInline,
   defaultAttrsFor,
 } from "./block.js";
+import { type EditorEventHub, createEditorEventHub } from "./events.js";
+import type { MentionMarkValue, PrincipalKind } from "./principal.js";
 
 const TREE_NAME = "content";
 const TEXT_KEY = "text";
@@ -114,6 +116,8 @@ export interface Editor {
   readonly tree: LoroTree;
   readonly origin: EditorOrigin;
   readonly commands: EditorCommands;
+  /** Semantic editor events (mentions, …) — see `events.ts`. */
+  readonly events: EditorEventHub;
   setEditable(editable: boolean): void;
   isEditable(): boolean;
   clear(): void;
@@ -168,6 +172,18 @@ export interface EditorCommands {
       blockId: BlockId;
       range: { start: number; end: number };
     }): void;
+    /**
+     * Replace `[range.start, range.end)` — typically the `@query` trigger
+     * text the user typed — with the principal's mention chip plus one
+     * trailing space, atomically (one commit, one undo step). Returns the
+     * character range of the marked label; the natural caret position is
+     * `end + 1` (after the trailing space). Emits `MentionCreated`.
+     */
+    insertMention(args: {
+      blockId: BlockId;
+      range: { start: number; end: number };
+      principal: { id: string; label: string; kind?: PrincipalKind };
+    }): { start: number; end: number };
     readonly mark: {
       update(args: {
         blockId: BlockId;
@@ -427,6 +443,7 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
   doc.configTextStyle(DEFAULT_TEXT_STYLES);
   const tree = doc.getTree(TREE_NAME);
   const origin: EditorOrigin = options.origin ?? "user";
+  const events = createEditorEventHub();
 
   // `undo` is created after the (optional) seed commit so the empty-doc
   // template is not itself an undo step. History commands close over it.
@@ -452,6 +469,33 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
     doc.commit({ origin });
     prevMergeable = mergeable;
     return result;
+  };
+
+  /**
+   * Programmatic mention application (`toggleMark` / `mark.update` with
+   * `mark: "mention"`) emits the same `MentionCreated` event as the
+   * `insertMention` flow, so listeners see agent- and API-created mentions
+   * too — not only picker-driven ones.
+   */
+  const emitIfMentionApplied = (
+    blockId: BlockId,
+    range: { start: number; end: number },
+    mark: MarkKind,
+    value: unknown,
+  ): void => {
+    if (mark !== "mention") return;
+    if (range.end <= range.start) return;
+    const v = value as MentionMarkValue | undefined;
+    if (!v || typeof v.userId !== "string" || typeof v.label !== "string") {
+      return;
+    }
+    events.emit({
+      _tag: "MentionCreated",
+      blockId,
+      range: { start: range.start, end: range.end },
+      principal: { id: v.userId, label: v.label, kind: v.kind },
+      origin,
+    });
   };
 
   const textLengthOf = (blockId: BlockId): number => {
@@ -486,6 +530,7 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
     tree,
     origin,
     commands: undefined as unknown as EditorCommands,
+    events,
     setEditable: (next: boolean) => {
       editable = next;
     },
@@ -508,6 +553,7 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
       /* DOM concern — no-op at the core layer */
     },
     dispose: () => {
+      events.dispose();
       try {
         undo?.free();
       } catch {
@@ -739,7 +785,8 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
         return text ? text.toDelta() : [];
       },
 
-      toggleMark: ({ blockId, range, mark, value }) =>
+      toggleMark: ({ blockId, range, mark, value }) => {
+        let applied = false;
         withOrigin(() => {
           const node = getNode(tree, blockId);
           if (!node) return;
@@ -784,7 +831,10 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
             text.unmark(range, "code");
           }
           text.mark(range, mark, value ?? true);
-        }),
+          applied = true;
+        });
+        if (applied) emitIfMentionApplied(blockId, range, mark, value);
+      },
 
       clearMarks: ({ blockId, range }) =>
         withOrigin(() => {
@@ -795,8 +845,47 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
           for (const key of MARK_KEYS) text.unmark(range, key);
         }),
 
+      insertMention: ({ blockId, range, principal }) => {
+        const node = getNode(tree, blockId);
+        if (!node) throw new Error(`block ${blockId} not found`);
+        if (!blockKindHasInline(getKind(node))) {
+          throw new Error(
+            `block ${blockId} (kind ${getKind(node)}) has no inline text`,
+          );
+        }
+        const label = principal.label.startsWith("@")
+          ? principal.label
+          : `@${principal.label}`;
+        const value: MentionMarkValue = {
+          userId: principal.id,
+          label,
+          ...(principal.kind !== undefined ? { kind: principal.kind } : {}),
+        };
+        validateMarkValue("mention", value);
+        const marked = withOrigin(() => {
+          const text = ensureText(node);
+          const len = text.length;
+          const start = Math.max(0, Math.min(range.start, len));
+          const end = Math.max(start, Math.min(range.end, len));
+          if (end > start) text.delete(start, end - start);
+          // Label + one trailing space; `mention` is `expand: "none"` so the
+          // space stays unmarked and the caret can sit after the chip.
+          text.insert(start, `${label} `);
+          text.mark({ start, end: start + label.length }, "mention", value);
+          return { start, end: start + label.length };
+        });
+        events.emit({
+          _tag: "MentionCreated",
+          blockId,
+          range: marked,
+          principal: { id: principal.id, label, kind: principal.kind },
+          origin,
+        });
+        return marked;
+      },
+
       mark: {
-        update: ({ blockId, range, mark, value }) =>
+        update: ({ blockId, range, mark, value }) => {
           withOrigin(() => {
             const node = getNode(tree, blockId);
             if (!node) return;
@@ -804,7 +893,9 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
             validateMarkValue(mark, value);
             const text = ensureText(node);
             text.mark(range, mark, value ?? true);
-          }),
+          });
+          emitIfMentionApplied(blockId, range, mark, value);
+        },
       },
     },
 

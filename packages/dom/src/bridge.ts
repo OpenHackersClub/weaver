@@ -3,10 +3,16 @@ import { blockElementContaining, blockIdOf, reconcileTopLevel } from "./dom-mapp
 import {
   type DomCaret,
   type DomRange,
+  caretRect,
   placeCaret,
   readDomSelection,
   writeDomSelection,
 } from "./selection-mapper.js";
+import {
+  type MentionTrigger,
+  detectMentionTrigger,
+  mentionTriggersEqual,
+} from "./mention-trigger.js";
 import {
   handleBackspace,
   handleClearFormatting,
@@ -23,6 +29,13 @@ import {
 
 export interface BridgeOptions {
   readonly classList?: ReadonlyArray<string>;
+  /**
+   * Fired whenever the @-mention trigger state behind the caret changes —
+   * `MentionTrigger` while the user is typing `@query`, `null` once the
+   * trigger is dismissed (whitespace, caret move, deletion of the `@`).
+   * Deduped: consecutive identical states notify once.
+   */
+  readonly onMentionTrigger?: (trigger: MentionTrigger | null) => void;
 }
 
 export interface AttachedBridge {
@@ -149,11 +162,15 @@ export const attachEditor = (
     flushing = true;
     flushScheduled = false;
     try {
+      // No pendingCaret (a remote/programmatic commit, not a local keystroke):
+      // capture the live selection as model offsets before reconciling, then
+      // write it back. Reconcile replaces marked runs via `replaceChildren`,
+      // which would otherwise silently drop the user's caret whenever their
+      // block carries marks.
+      const restore = pendingCaret ?? readDomSelection(host);
       reconcileTopLevel(editor, host);
-      if (pendingCaret) {
-        writeDomSelection(host, pendingCaret);
-        pendingCaret = null;
-      }
+      if (restore) writeDomSelection(host, restore);
+      pendingCaret = null;
     } finally {
       flushing = false;
     }
@@ -175,6 +192,38 @@ export const attachEditor = (
   const unsub = editor.doc.subscribe(() => {
     scheduleRerender();
   });
+
+  // ---- @-mention trigger tracking -----------------------------------------
+  let lastTrigger: MentionTrigger | null = null;
+
+  /** Re-evaluate the trigger behind the caret; notify the host app on change. */
+  const notifyMentionTrigger = (): void => {
+    const notify = options.onMentionTrigger;
+    if (!notify) return;
+    let next: MentionTrigger | null = null;
+    if (!composing) {
+      const range = readDomSelection(host);
+      if (range && range.collapsed) {
+        const detected = detectMentionTrigger(editor, range.anchor);
+        if (detected) {
+          next = {
+            ...detected,
+            rect: caretRect(host, {
+              blockId: detected.blockId,
+              offset: detected.start,
+            }),
+          };
+        }
+      }
+    }
+    if (mentionTriggersEqual(lastTrigger, next)) return;
+    lastTrigger = next;
+    notify(next);
+  };
+
+  const onSelectionChange = (): void => {
+    notifyMentionTrigger();
+  };
 
   const applyBeforeInput = (e: InputEvent): void => {
     let range = readDomSelection(host);
@@ -323,6 +372,7 @@ export const attachEditor = (
       // next beforeinput event reads it. See flushRerender() for why this
       // can't wait for a microtask.
       flushRerender();
+      notifyMentionTrigger();
     }
   };
 
@@ -434,6 +484,7 @@ export const attachEditor = (
     composedTarget = null;
     composedInitial = "";
     flushRerender();
+    notifyMentionTrigger();
   };
 
   const onFocus = (): void => {
@@ -457,6 +508,12 @@ export const attachEditor = (
   host.addEventListener("compositionend", onCompositionEnd);
   host.addEventListener("focus", onFocus);
   host.addEventListener("mousedown", onMouseDown);
+  // Caret moves (arrow keys, clicks) don't go through beforeinput — the
+  // document-level selectionchange event is what dismisses / re-opens the
+  // mention trigger on pure caret motion.
+  if (options.onMentionTrigger) {
+    host.ownerDocument.addEventListener("selectionchange", onSelectionChange);
+  }
 
   return {
     host,
@@ -468,6 +525,12 @@ export const attachEditor = (
       host.removeEventListener("compositionend", onCompositionEnd);
       host.removeEventListener("focus", onFocus);
       host.removeEventListener("mousedown", onMouseDown);
+      if (options.onMentionTrigger) {
+        host.ownerDocument.removeEventListener(
+          "selectionchange",
+          onSelectionChange,
+        );
+      }
       host.removeAttribute("contenteditable");
       host.removeAttribute("data-weaver-root");
       unsub();

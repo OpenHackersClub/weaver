@@ -107,6 +107,42 @@ export const placeCaret = (host: HTMLElement, caret: DomCaret): void => {
   writeDomSelection(host, { anchor: caret, focus: caret, collapsed: true });
 };
 
+/**
+ * Viewport rectangle of a model caret position — used to anchor floating UI
+ * (e.g. the mention picker) to a character. Returns `null` when no layout
+ * information is available (block missing, or a headless DOM that reports
+ * all-zero rects).
+ */
+export const caretRect = (
+  host: HTMLElement,
+  caret: DomCaret,
+): { left: number; top: number; bottom: number } | null => {
+  const el = findBlockElement(host, caret.blockId);
+  if (!el) return null;
+  const target = findTextNode(el, caret.offset);
+  const r = host.ownerDocument.createRange();
+  try {
+    r.setStart(target.node, target.offset);
+    r.setEnd(target.node, target.offset);
+  } catch {
+    return null;
+  }
+  // jsdom ships Range without getBoundingClientRect — treat it like a
+  // zero rect and fall through to the block element's box.
+  const rect =
+    typeof r.getBoundingClientRect === "function"
+      ? r.getBoundingClientRect()
+      : null;
+  if (rect && (rect.left !== 0 || rect.top !== 0 || rect.bottom !== 0)) {
+    return { left: rect.left, top: rect.top, bottom: rect.bottom };
+  }
+  // A collapsed range can report a zero rect (notably in headless DOMs);
+  // fall back to the block element's own box.
+  const elRect = el.getBoundingClientRect();
+  if (elRect.left === 0 && elRect.top === 0 && elRect.bottom === 0) return null;
+  return { left: elRect.left, top: elRect.top, bottom: elRect.bottom };
+};
+
 export const computeMarkRangeWithinBlock = (
   editor: Editor,
   range: DomRange,
