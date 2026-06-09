@@ -78,8 +78,8 @@ const deleteDomRange = (editor: Editor, range: DomRange): DomCaret => {
   return sel ? sel.anchor : range.anchor;
 };
 
-const richifyHost = (host: HTMLElement, opts: BridgeOptions): void => {
-  host.setAttribute("contenteditable", "true");
+const richifyHost = (host: HTMLElement, opts: BridgeOptions, editable: boolean): void => {
+  host.setAttribute("contenteditable", editable ? "true" : "false");
   host.setAttribute("data-weaver-root", "");
   host.setAttribute("spellcheck", "true");
   host.setAttribute("role", "textbox");
@@ -150,8 +150,15 @@ export const attachEditor = (
   host: HTMLElement,
   options: BridgeOptions = {},
 ): AttachedBridge => {
-  richifyHost(host, options);
+  richifyHost(host, options, editor.isEditable());
   reconcileTopLevel(editor, host);
+
+  // Read-only mode (lexical-parity §3): mirror the core editable flag onto
+  // `contenteditable` so the browser stops accepting input at the source; the
+  // beforeinput/keydown guards below are the backstop for synthetic events.
+  const unsubEditable = editor.onEditableChange(() => {
+    host.setAttribute("contenteditable", editor.isEditable() ? "true" : "false");
+  });
 
   let pendingCaret: DomRange | null = null;
   // The block most recently targeted by Tab/Shift+Tab. An indent nests the
@@ -401,6 +408,12 @@ export const attachEditor = (
 
   const onBeforeInput = (ev: Event): void => {
     if (composing) return;
+    if (!editor.isEditable()) {
+      // Read-only: swallow the input instead of letting the browser (or a
+      // synthetic event) mutate the surface.
+      ev.preventDefault();
+      return;
+    }
     const e = ev as InputEvent;
     // LoroDoc is the single source of truth (D1); never let the browser
     // mutate the DOM out-of-band.
@@ -417,6 +430,16 @@ export const attachEditor = (
   };
 
   const onKeyDown = (ev: KeyboardEvent): void => {
+    // Read-only: every shortcut below mutates the doc (indent, undo, marks,
+    // clear-formatting) except Ctrl/Cmd+A, which is pure selection.
+    if (!editor.isEditable()) {
+      const lower = ev.key.toLowerCase();
+      const isSelectAll = (ev.ctrlKey || ev.metaKey) && lower === "a";
+      if (!isSelectAll) {
+        ev.preventDefault();
+        return;
+      }
+    }
     // Tab / Shift+Tab — indent / outdent the current block. No modifier
     // required, so handle it before the modifier early-return below.
     if (ev.key === "Tab") {
@@ -666,6 +689,7 @@ export const attachEditor = (
       }
       host.removeAttribute("contenteditable");
       host.removeAttribute("data-weaver-root");
+      unsubEditable();
       unsub();
     },
   };

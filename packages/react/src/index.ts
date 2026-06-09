@@ -14,3 +14,9 @@ export {
   type MentionsApi,
   type UseMentionsOptions,
 } from "./mentions.js";
+export {
+  useSelection,
+  useUndoState,
+  useEditable,
+  type UndoState,
+} from "./use-editor-state.js";

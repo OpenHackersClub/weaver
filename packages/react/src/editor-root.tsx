@@ -21,6 +21,11 @@ export interface EditorRootProps {
   readonly bridgeOptions?: BridgeOptions;
   /** Receives the contenteditable host element once attached. */
   readonly hostRef?: MutableRefObject<HTMLDivElement | null>;
+  /**
+   * Declarative read-only toggle (lexical-parity §5). Omit to leave the
+   * editor's own `setEditable` state untouched.
+   */
+  readonly editable?: boolean;
 }
 
 export const EditorRoot = ({
@@ -30,10 +35,15 @@ export const EditorRoot = ({
   autoFocus,
   bridgeOptions,
   hostRef,
+  editable,
 }: EditorRootProps) => {
   const ref = useRef<HTMLDivElement | null>(null);
   const optsRef = useRef<BridgeOptions | undefined>(bridgeOptions);
   optsRef.current = bridgeOptions;
+
+  useEffect(() => {
+    if (editable !== undefined) editor.setEditable(editable);
+  }, [editor, editable]);
 
   useEffect(() => {
     const el = ref.current;

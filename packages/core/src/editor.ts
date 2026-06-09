@@ -183,6 +183,17 @@ export interface Editor {
   focus(): void;
   blur(): void;
   dispose(): void;
+  /**
+   * Change notifications for editor state that lives OUTSIDE the LoroDoc
+   * (selection, editable flag, undo-stack resets) — `doc.subscribe` cannot
+   * observe these. Each returns an unsubscribe function; listeners fire
+   * synchronously after the state change. The React hooks in `@weaver/react`
+   * (`useSelection`, `useEditable`, `useUndoState` — lexical-parity §5)
+   * consume them via `useSyncExternalStore`.
+   */
+  onSelectionChange(listener: () => void): () => void;
+  onEditableChange(listener: () => void): () => void;
+  onHistoryChange(listener: () => void): () => void;
 }
 
 export interface EditorCommands {
@@ -511,6 +522,29 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
   let editable = true;
   let currentSelection: SelectionRange | null = null;
 
+  const selectionListeners = new Set<() => void>();
+  const editableListeners = new Set<() => void>();
+  const historyListeners = new Set<() => void>();
+  // Copy before iterating so a listener unsubscribing (or subscribing a new
+  // listener) mid-notification can't corrupt the iteration.
+  const notify = (listeners: Set<() => void>): void => {
+    for (const fn of [...listeners]) fn();
+  };
+  const subscribe =
+    (listeners: Set<() => void>) =>
+    (listener: () => void): (() => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    };
+
+  /** Assign `currentSelection` and notify selection listeners. */
+  const setCurrentSelection = (next: SelectionRange | null): void => {
+    currentSelection = next;
+    notify(selectionListeners);
+  };
+
   // Undo-step grouping: consecutive `text.insert`/`text.delete` ops merge into
   // a single step (one undo per typing burst); every other op forces a fresh
   // step. `flushMergeWindow` resets the run so the next text op starts fresh.
@@ -612,7 +646,9 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
     commands: undefined as unknown as EditorCommands,
     events,
     setEditable: (next: boolean) => {
+      if (editable === next) return;
       editable = next;
+      notify(editableListeners);
     },
     isEditable: () => editable,
     clear: () => {
@@ -624,8 +660,11 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
         const fresh = tree.createNode();
         initBlockNode(fresh, "paragraph", {});
       });
-      currentSelection = null;
+      setCurrentSelection(null);
     },
+    onSelectionChange: subscribe(selectionListeners),
+    onEditableChange: subscribe(editableListeners),
+    onHistoryChange: subscribe(historyListeners),
     focus: () => {
       /* DOM concern — no-op at the core layer */
     },
@@ -984,11 +1023,22 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
     },
 
     history: {
-      undo: () => undo?.undo() ?? false,
-      redo: () => undo?.redo() ?? false,
+      undo: () => {
+        const did = undo?.undo() ?? false;
+        notify(historyListeners);
+        return did;
+      },
+      redo: () => {
+        const did = undo?.redo() ?? false;
+        notify(historyListeners);
+        return did;
+      },
       canUndo: () => undo?.canUndo() ?? false,
       canRedo: () => undo?.canRedo() ?? false,
-      clearHistory: () => undo?.clear(),
+      clearHistory: () => {
+        undo?.clear();
+        notify(historyListeners);
+      },
       flushMergeWindow: () => {
         prevMergeable = false;
       },
@@ -996,10 +1046,10 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
 
     selection: {
       set: (range) => {
-        currentSelection = {
+        setCurrentSelection({
           anchor: { ...range.anchor },
           focus: { ...range.focus },
-        };
+        });
       },
 
       get: () => currentSelection,
@@ -1009,21 +1059,21 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
         const first = order[0];
         const last = order[order.length - 1];
         if (first === undefined || last === undefined) {
-          currentSelection = null;
+          setCurrentSelection(null);
           return;
         }
-        currentSelection = {
+        setCurrentSelection({
           anchor: { blockId: first, offset: 0 },
           focus: { blockId: last, offset: textLengthOf(last) },
-        };
+        });
       },
 
       collapse: (blockId, offset) => {
         const clamped = Math.max(0, Math.min(offset, textLengthOf(blockId)));
-        currentSelection = {
+        setCurrentSelection({
           anchor: { blockId, offset: clamped },
           focus: { blockId, offset: clamped },
-        };
+        });
       },
 
       getTextContent: () => {
@@ -1162,10 +1212,10 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
     }
 
     const caret = start.offset + (value ? value.length : 0);
-    currentSelection = {
+    setCurrentSelection({
       anchor: { blockId: start.blockId, offset: caret },
       focus: { blockId: start.blockId, offset: caret },
-    };
+    });
   }
 
   /**
