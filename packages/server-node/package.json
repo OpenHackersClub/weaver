@@ -1,0 +1,32 @@
+{
+  "name": "@weaver/server-node",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Weaver sync server: portable Node `ws` adapter for @weaver/sync-core. A long-lived WebSocket relay deployable as a container on AWS (Fargate/App Runner/EC2) or any host. Bare relay — Biscuit auth/ACL stay the Cloudflare-side Phase 2b work.",
+  "main": "./src/server.ts",
+  "types": "./src/server.ts",
+  "exports": {
+    ".": "./src/server.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@weaver/sync-core": "workspace:*",
+    "effect": "^3.21.2",
+    "loro-crdt": "^1.12.1",
+    "tsx": "^4.19.2",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

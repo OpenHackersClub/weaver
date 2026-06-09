@@ -2,7 +2,8 @@ export {
   type PeerConnection,
   SyncRoom,
   FrameImportError,
-} from "./sync-room.js";
+  SNAPSHOT_EVERY_N_FRAMES,
+} from "@weaver/sync-core";
 
 export { type Env, WeaverSyncDO } from "./durable-object.js";
 

@@ -1,0 +1,29 @@
+{
+  "name": "@weaver/sync-core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Weaver sync relay core: transport-agnostic per-document Loro relay (SyncRoom + PeerConnection). Runtime-neutral — shared by the Cloudflare Durable Object (@weaver/server) and the portable Node ws server (@weaver/server-node).",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "effect": "^3.21.2"
+  },
+  "peerDependencies": {
+    "loro-crdt": "^1.12.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "loro-crdt": "^1.12.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

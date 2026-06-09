@@ -25,9 +25,10 @@ import { LoroDoc } from "loro-crdt";
  *
  * The room is deliberately transport-free so it can be unit-tested with
  * in-memory fake connections under plain `vitest` (Node), exactly the way
- * `@weaver/sync` tests its `WsBridge` with an injected socket factory. The
- * Durable Object (`durable-object.ts`) is a thin adapter that wires
- * Cloudflare's hibernatable WebSocket API to this class.
+ * `@weaver/sync` tests its `WsBridge` with an injected socket factory. Each
+ * deployment target is a thin adapter that maps its runtime's socket to a
+ * `PeerConnection`: `@weaver/server` wires Cloudflare's hibernatable WebSocket
+ * API, and `@weaver/server-node` wires the Node `ws` library.
  *
  * NOT here (Phase 2b follow-ups, same deferral as PR #19):
  *   - Biscuit-token auth on the WS upgrade and the per-doc read/write gate.
@@ -35,6 +36,16 @@ import { LoroDoc } from "loro-crdt";
  *   - Subdoc partitioning / per-tier filtered broadcast.
  *   - R2 cold snapshots with GC; presence relay over the wire.
  */
+
+/**
+ * Re-snapshot the canonical doc to durable storage every N relayed frames, so
+ * the in-memory replica can be rebuilt cheaply after an eviction/restart. Same
+ * order of magnitude as `@weaver/sync`'s client-side `snapshotEveryNOps` (50) —
+ * not yet tuned against real workloads. Shared by every adapter (the Cloudflare
+ * Durable Object and the portable Node `ws` server) so the cadence is defined
+ * once.
+ */
+export const SNAPSHOT_EVERY_N_FRAMES = 50;
 
 /** A single connected peer, abstracted away from the WebSocket runtime. */
 export interface PeerConnection {

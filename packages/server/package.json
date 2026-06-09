@@ -8,7 +8,6 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./sync-room": "./src/sync-room.ts",
     "./durable-object": "./src/durable-object.ts"
   },
   "scripts": {
@@ -19,6 +18,7 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@weaver/sync-core": "workspace:*",
     "effect": "^3.21.2"
   },
   "peerDependencies": {
