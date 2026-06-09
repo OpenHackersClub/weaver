@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+dist
+**/dist
+.git
+.github
+.astro
+.turbo
+**/*.tsbuildinfo
+apps/docs
+apps/playground
+.claude

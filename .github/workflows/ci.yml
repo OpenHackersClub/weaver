@@ -50,11 +50,26 @@ jobs:
       - name: Typecheck @weaver/sync
         run: pnpm --filter @weaver/sync typecheck
 
+      - name: Typecheck @weaver/sync-core
+        run: pnpm --filter @weaver/sync-core typecheck
+
+      - name: Typecheck @weaver/server
+        run: pnpm --filter @weaver/server typecheck
+
+      - name: Typecheck @weaver/server-node
+        run: pnpm --filter @weaver/server-node typecheck
+
       - name: Unit tests — @weaver/core
         run: pnpm --filter @weaver/core test
 
       - name: Unit tests — @weaver/sync
         run: pnpm --filter @weaver/sync test
+
+      - name: Unit tests — @weaver/sync-core
+        run: pnpm --filter @weaver/sync-core test
+
+      - name: Unit tests — @weaver/server-node
+        run: pnpm --filter @weaver/server-node test
 
       - name: Build playground SPA
         run: pnpm --filter @weaver/playground build

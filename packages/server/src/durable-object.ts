@@ -1,6 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 import { Effect, Either } from "effect";
-import { type PeerConnection, SyncRoom } from "./sync-room.js";
+import {
+  type PeerConnection,
+  SNAPSHOT_EVERY_N_FRAMES,
+  SyncRoom,
+} from "@weaver/sync-core";
 
 export interface Env {
   /** Per-document relay DO. One instance per `idFromName(docId)`. */
@@ -11,17 +15,13 @@ export interface Env {
 const SNAPSHOT_KEY = "snapshot";
 
 /**
- * Re-snapshot the canonical doc to DO storage every N relayed frames, then
- * the in-memory replica can be rebuilt cheaply after hibernation/eviction.
- * Same order of magnitude as `@weaver/sync`'s client-side `snapshotEveryNOps`
- * (50) — not yet tuned against real workloads.
- *
  * NOTE: this MVP persists a full snapshot rather than an appended op-log with
  * truncation (the `specs/architecture.md#6` "deltas to DO storage, snapshots to
  * R2" split). Snapshot-only keeps rehydration a single `import`; the op-log +
- * R2 cold-storage split is a Phase 2b follow-up.
+ * R2 cold-storage split is a Phase 2b follow-up. The snapshot cadence
+ * (`SNAPSHOT_EVERY_N_FRAMES`) is shared with the Node adapter via
+ * `@weaver/sync-core`.
  */
-const SNAPSHOT_EVERY_N_FRAMES = 50;
 
 /**
  * Per-document Loro-sync relay, backed by Cloudflare's **hibernatable**
