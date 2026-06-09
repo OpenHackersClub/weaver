@@ -52,6 +52,11 @@ export const nav: NavSection[] = [
         blurb: "Five concrete WASM uses; the Zero pattern stolen for read-models.",
       },
       {
+        slug: "ui-framework-compatibility",
+        label: "Framework Compatibility",
+        blurb: "Which UI frameworks integrate with weaver, and the WASM + Effect-TS complexity that shapes each adapter.",
+      },
+      {
         slug: "ai-agent",
         label: "AI Agent",
         blurb: "Peer model, streaming, tools, multi-agent.",
