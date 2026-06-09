@@ -111,6 +111,47 @@ export interface SelectionCommands {
   getBlockIds(): ReadonlyArray<BlockId>;
 }
 
+export interface ClipboardDeltaRun {
+  readonly insert: string;
+  readonly attributes?: Record<string, unknown>;
+}
+
+/**
+ * One block of a clipboard payload: kind + attrs + inline runs (with marks)
+ * + nested children. The structured analog of Lexical's clipboard node JSON
+ * (`application/x-lexical-editor`); the @weaver/dom bridge serializes this
+ * as the `application/x-weaver` clipboard flavor.
+ */
+export interface ClipboardFragment {
+  readonly kind: BlockKind;
+  readonly attrs: Record<string, unknown>;
+  /** Inline runs with marks; absent for non-inline kinds (divider, image…). */
+  readonly delta?: ReadonlyArray<ClipboardDeltaRun>;
+  readonly children: ReadonlyArray<ClipboardFragment>;
+}
+
+export interface ClipboardPayload {
+  /** Plain-text rendering of the fragment, blocks joined by `\n`. */
+  readonly text: string;
+  /** Structured weaver fragment — kinds, attrs, marks, nesting. */
+  readonly blocks: ReadonlyArray<ClipboardFragment>;
+}
+
+export interface ClipboardCommands {
+  /** Serialize the current selection. `null` when collapsed or absent. */
+  copy(): ClipboardPayload | null;
+  /** `copy()` + delete the selected range. */
+  cut(): ClipboardPayload | null;
+  /**
+   * Insert a payload at the current selection, replacing it when
+   * non-collapsed. A payload without structured `blocks` (e.g. text copied
+   * from another app) falls back to `pasteText`.
+   */
+  paste(payload: ClipboardPayload | { readonly text: string }): void;
+  /** Plain-text paste: `\n` splits blocks, mirroring Enter between lines. */
+  pasteText(value: string): void;
+}
+
 export interface Editor {
   readonly doc: LoroDoc;
   readonly tree: LoroTree;
@@ -195,6 +236,7 @@ export interface EditorCommands {
   };
   readonly history: HistoryCommands;
   readonly selection: SelectionCommands;
+  readonly clipboard: ClipboardCommands;
 }
 
 interface DeltaRun {
@@ -982,6 +1024,25 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
       insertText: (value) => mutateSelectionRange(value),
       deleteRange: () => mutateSelectionRange(null),
     },
+
+    clipboard: {
+      copy: () => buildClipboardPayload(),
+      cut: () => {
+        const payload = buildClipboardPayload();
+        if (!payload) return null;
+        mutateSelectionRange(null);
+        return payload;
+      },
+      paste: (payload) => {
+        const blocks = "blocks" in payload ? payload.blocks : undefined;
+        if (!blocks || blocks.length === 0) {
+          pasteTextImpl(payload.text);
+          return;
+        }
+        pasteStructured(blocks);
+      },
+      pasteText: (value) => pasteTextImpl(value),
+    },
   };
 
   /**
@@ -1062,6 +1123,208 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
       anchor: { blockId: start.blockId, offset: caret },
       focus: { blockId: start.blockId, offset: caret },
     };
+  }
+
+  /**
+   * Serialize the current selection into a `ClipboardPayload`. Nesting is
+   * preserved: a selected block whose parent is also selected becomes a child
+   * fragment; otherwise it surfaces as a top-level fragment.
+   */
+  function buildClipboardPayload(): ClipboardPayload | null {
+    const sel = currentSelection;
+    if (!sel) return null;
+    const order = documentOrder();
+    const ai = order.indexOf(sel.anchor.blockId);
+    const fi = order.indexOf(sel.focus.blockId);
+    if (ai < 0 || fi < 0) return null;
+    if (ai === fi && sel.anchor.offset === sel.focus.offset) return null;
+    const [start, end] = orderEndpoints(sel, ai, fi);
+    const ids = order.slice(Math.min(ai, fi), Math.max(ai, fi) + 1);
+
+    interface MutableFragment {
+      kind: BlockKind;
+      attrs: Record<string, unknown>;
+      delta?: ClipboardDeltaRun[];
+      children: MutableFragment[];
+    }
+    const fragOf = new Map<BlockId, MutableFragment>();
+    const top: MutableFragment[] = [];
+    for (const id of ids) {
+      const node = getNode(tree, id);
+      if (!node) continue;
+      const kind = getKind(node);
+      const frag: MutableFragment = { kind, attrs: getAttrs(node), children: [] };
+      if (blockKindHasInline(kind)) {
+        const text = getText(node);
+        const full = text ? (text.toDelta() as DeltaRun[]) : [];
+        const len = text ? text.length : 0;
+        const from = id === start.blockId ? start.offset : 0;
+        const to = id === end.blockId ? end.offset : len;
+        frag.delta = sliceDelta(full, from, to).map((run) =>
+          run.attributes && Object.keys(run.attributes).length > 0
+            ? { insert: run.insert ?? "", attributes: run.attributes }
+            : { insert: run.insert ?? "" },
+        );
+      }
+      const parent = node.parent();
+      const parentFrag = parent ? fragOf.get(String(parent.id)) : undefined;
+      if (parentFrag) parentFrag.children.push(frag);
+      else top.push(frag);
+      fragOf.set(id, frag);
+    }
+    return { text: commands.selection.getTextContent(), blocks: top };
+  }
+
+  /** Concatenated inline text of a fragment (excluding children). */
+  function fragmentTextLength(frag: ClipboardFragment): number {
+    return (frag.delta ?? []).reduce((n, run) => n + run.insert.length, 0);
+  }
+
+  /** Whether a fragment can merge into surrounding inline text. */
+  function isInlineFragment(frag: ClipboardFragment): boolean {
+    return blockKindHasInline(frag.kind) && frag.delta !== undefined;
+  }
+
+  /**
+   * Insert a fragment's inline runs into `blockId` at `offset`, re-applying
+   * marks and suppressing `expand: "after"` bleed from the character before
+   * the insertion point (same guard as `block.merge`). Returns the inserted
+   * length.
+   */
+  function insertDeltaInline(
+    blockId: BlockId,
+    offset: number,
+    delta: ReadonlyArray<ClipboardDeltaRun>,
+  ): number {
+    const value = delta.map((run) => run.insert).join("");
+    if (!value) return 0;
+    const node = getNode(tree, blockId);
+    if (!node) return 0;
+    withOrigin(() => {
+      const text = ensureText(node);
+      const prevDelta = text.toDelta() as DeltaRun[];
+      const before = sliceDelta(prevDelta, Math.max(0, offset - 1), offset);
+      const bleedKeys = before[0]?.attributes
+        ? Object.keys(before[0].attributes).filter((k) =>
+            EXPAND_AFTER_MARKS.has(k),
+          )
+        : [];
+      text.insert(offset, value);
+      for (const key of bleedKeys) {
+        text.unmark({ start: offset, end: offset + value.length }, key);
+      }
+      applyDeltaMarks(text, delta as DeltaRun[], offset);
+    });
+    return value.length;
+  }
+
+  /** Materialize a fragment (and its children) as a new block subtree. */
+  function createFragmentBlock(
+    parentId: BlockId,
+    index: number,
+    frag: ClipboardFragment,
+  ): BlockId {
+    const id = commands.block.insert({
+      parentId,
+      index,
+      kind: frag.kind,
+      attrs: frag.attrs,
+    });
+    if (frag.delta && blockKindHasInline(frag.kind)) {
+      insertDeltaInline(id, 0, frag.delta);
+    }
+    frag.children.forEach((child, i) => createFragmentBlock(id, i, child));
+    return id;
+  }
+
+  /**
+   * Structured paste, mirroring Lexical's `$insertNodes` on a range: the
+   * anchor block splits at the caret; the first inline fragment merges into
+   * the anchor head; the last inline childless fragment absorbs the tail;
+   * everything else lands as sibling blocks in between.
+   */
+  function pasteStructured(blocks: ReadonlyArray<ClipboardFragment>): void {
+    const sel = currentSelection;
+    if (!sel) return;
+    const collapsed =
+      sel.anchor.blockId === sel.focus.blockId &&
+      sel.anchor.offset === sel.focus.offset;
+    if (!collapsed) mutateSelectionRange(null);
+    const caret = currentSelection;
+    if (!caret) return;
+    const anchorId = caret.anchor.blockId;
+    const offset = caret.anchor.offset;
+
+    const first = blocks[0]!;
+    if (
+      blocks.length === 1 &&
+      isInlineFragment(first) &&
+      first.children.length === 0
+    ) {
+      const n = insertDeltaInline(anchorId, offset, first.delta!);
+      commands.selection.collapse(anchorId, offset + n);
+      return;
+    }
+
+    const tailId = commands.block.split({ blockId: anchorId, offset });
+    let idx = 0;
+    if (isInlineFragment(first) && first.children.length === 0) {
+      insertDeltaInline(anchorId, offset, first.delta!);
+      idx = 1;
+    }
+
+    const anchorNode = getNode(tree, anchorId);
+    const parent = anchorNode?.parent();
+    const parentId = parent ? String(parent.id) : ROOT_ID;
+    let insertIndex = (anchorNode?.index() ?? 0) + 1;
+    let last: { id: BlockId; frag: ClipboardFragment } | null = null;
+    for (; idx < blocks.length; idx++) {
+      const frag = blocks[idx]!;
+      last = { id: createFragmentBlock(parentId, insertIndex, frag), frag };
+      insertIndex += 1;
+    }
+
+    if (last && isInlineFragment(last.frag) && last.frag.children.length === 0) {
+      const caretOffset = fragmentTextLength(last.frag);
+      commands.block.merge({ prevId: last.id, nextId: tailId });
+      commands.selection.collapse(last.id, caretOffset);
+      return;
+    }
+    // The tail couldn't merge (last fragment is non-inline or has children).
+    // An empty tail is dropped — otherwise pasting at the end of a block
+    // would strand an empty paragraph after the pasted content.
+    if (textLengthOf(tailId) === 0 && childIds(tree, tailId).length === 0) {
+      commands.block.delete({ blockId: tailId });
+      if (last) {
+        commands.selection.collapse(
+          last.id,
+          isInlineFragment(last.frag) ? fragmentTextLength(last.frag) : 0,
+        );
+      }
+      return;
+    }
+    commands.selection.collapse(tailId, 0);
+  }
+
+  /** Plain-text paste: first line via `insertText`, each `\n` via `split`. */
+  function pasteTextImpl(value: string): void {
+    if (!currentSelection) return;
+    if (value === "") return;
+    const lines = value.replace(/\r\n?/g, "\n").split("\n");
+    mutateSelectionRange(lines[0]!);
+    const sel = currentSelection;
+    if (!sel) return;
+    let cur = sel.anchor.blockId;
+    let caretOffset = sel.anchor.offset;
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i]!;
+      cur = commands.block.split({ blockId: cur, offset: caretOffset });
+      if (line.length > 0) {
+        commands.text.insert({ blockId: cur, offset: 0, value: line });
+      }
+      caretOffset = line.length;
+    }
+    commands.selection.collapse(cur, caretOffset);
   }
 
   (editor as { commands: EditorCommands }).commands = commands;

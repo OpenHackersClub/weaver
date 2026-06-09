@@ -93,7 +93,7 @@ Lexical's command bus is `editor.dispatchCommand(COMMAND, payload)`. weaver's co
 | Keyboard (`KEY_*_COMMAND` family — arrows, enter, backspace, etc.) | core keymap in `@weaver/dom`; plugins register key handlers via the plugin contract | ✅ |
 | Focus / blur (`FOCUS_COMMAND`, `BLUR_COMMAND`) | `editor.focus()` / `editor.blur()` on the surface | ✅ |
 | Drag & drop (`DRAGSTART_COMMAND` / `DRAGOVER_COMMAND` / `DRAGEND_COMMAND` / `DROP_COMMAND`) | drag handle UI dispatches `block.move(blockId, newParentId, newIndex)` | ✅ |
-| Clipboard (`COPY_COMMAND` / `CUT_COMMAND` / `PASTE_COMMAND`) | `clipboard.*` surface with HTML / Markdown / `weaver+loro` binary serialization | ✅ |
+| Clipboard (`COPY_COMMAND` / `CUT_COMMAND` / `PASTE_COMMAND`) | `clipboard.*` surface ([`packages/core/src/editor.ts`](../packages/core/src/editor.ts), DOM events in [`packages/dom/src/bridge.ts`](../packages/dom/src/bridge.ts)) — plain text + structured `application/x-weaver` JSON fragment (kinds, attrs, marks, nesting); HTML / Markdown codecs land with `@weaver/plugins-html` / `@weaver/plugins-markdown` | ✅ |
 | `CAN_UNDO_COMMAND` / `CAN_REDO_COMMAND` introspection | `useUndoState()` hook | ✅ |
 | Read-only mode | `editor.setEditable(false)` toggle | ✅ |
 

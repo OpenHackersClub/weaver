@@ -521,6 +521,73 @@ export const attachEditor = (
     notifyMentionTrigger();
   };
 
+  // Clipboard — specs/lexical-parity.md §3 (COPY / CUT / PASTE). The
+  // structured flavor `application/x-weaver` carries kinds, attrs, marks and
+  // nesting between weaver surfaces; `text/plain` interoperates with
+  // everything else. HTML import/export is the @weaver/plugins-html follow-up.
+  const WEAVER_MIME = "application/x-weaver";
+
+  /** Snapshot the live DOM selection into the core selection state. */
+  const syncSelectionFromDom = (): DomRange | null => {
+    const range = readDomSelection(host);
+    if (!range) return null;
+    editor.commands.selection.set(range);
+    return range;
+  };
+
+  const writeClipboard = (ev: ClipboardEvent, cutting: boolean): void => {
+    if (!ev.clipboardData) return;
+    if (!syncSelectionFromDom()) return;
+    const payload = cutting
+      ? editor.commands.clipboard.cut()
+      : editor.commands.clipboard.copy();
+    if (!payload) return;
+    // The browser default would serialize the DOM selection itself —
+    // preventDefault so the model-derived payload is authoritative.
+    ev.preventDefault();
+    ev.clipboardData.setData("text/plain", payload.text);
+    ev.clipboardData.setData(WEAVER_MIME, JSON.stringify(payload));
+    if (cutting) {
+      const sel = editor.commands.selection.get();
+      if (sel) {
+        pendingCaret = { anchor: sel.anchor, focus: sel.anchor, collapsed: true };
+      }
+      flushRerender();
+    }
+  };
+
+  const onCopy = (ev: Event): void => writeClipboard(ev as ClipboardEvent, false);
+  const onCut = (ev: Event): void => writeClipboard(ev as ClipboardEvent, true);
+
+  const onPaste = (ev: Event): void => {
+    const e = ev as ClipboardEvent;
+    if (!e.clipboardData) return;
+    // Always claim the paste: LoroDoc is the single source of truth (D1), so
+    // the browser must never splice clipboard HTML into the DOM directly.
+    e.preventDefault();
+    if (!syncSelectionFromDom()) return;
+    const structured = e.clipboardData.getData(WEAVER_MIME);
+    if (structured) {
+      try {
+        editor.commands.clipboard.paste(JSON.parse(structured));
+      } catch {
+        // Corrupt flavor (e.g. truncated by another app) — fall back to text.
+        editor.commands.clipboard.pasteText(
+          e.clipboardData.getData("text/plain") ?? "",
+        );
+      }
+    } else {
+      const text = e.clipboardData.getData("text/plain");
+      if (!text) return;
+      editor.commands.clipboard.pasteText(text);
+    }
+    const sel = editor.commands.selection.get();
+    if (sel) {
+      pendingCaret = { anchor: sel.anchor, focus: sel.anchor, collapsed: true };
+    }
+    flushRerender();
+  };
+
   const onFocus = (): void => {
     ensureCaretInBlock(editor, host);
   };
@@ -542,6 +609,9 @@ export const attachEditor = (
   host.addEventListener("compositionend", onCompositionEnd);
   host.addEventListener("focus", onFocus);
   host.addEventListener("mousedown", onMouseDown);
+  host.addEventListener("copy", onCopy);
+  host.addEventListener("cut", onCut);
+  host.addEventListener("paste", onPaste);
   // Caret moves (arrow keys, clicks) don't go through beforeinput — the
   // document-level selectionchange event is what dismisses / re-opens the
   // mention trigger on pure caret motion.
@@ -566,6 +636,9 @@ export const attachEditor = (
       host.removeEventListener("compositionend", onCompositionEnd);
       host.removeEventListener("focus", onFocus);
       host.removeEventListener("mousedown", onMouseDown);
+      host.removeEventListener("copy", onCopy);
+      host.removeEventListener("cut", onCut);
+      host.removeEventListener("paste", onPaste);
       if (options.onMentionTrigger) {
         host.ownerDocument.removeEventListener(
           "selectionchange",
