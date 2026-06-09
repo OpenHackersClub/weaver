@@ -1,0 +1,34 @@
+{
+  "name": "@weaver/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Weaver sync server: per-document Loro-sync relay Durable Object (WebSocket hibernation) + Cloudflare Worker. The real peer behind @weaver/sync's WsBridge. Biscuit auth, op-validation, subdoc partitioning, and R2 snapshot GC land in Phase 2b.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sync-room": "./src/sync-room.ts",
+    "./durable-object": "./src/durable-object.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "effect": "^3.21.2"
+  },
+  "peerDependencies": {
+    "loro-crdt": "^1.12.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "loro-crdt": "^1.12.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "wrangler": "^3.90.0"
+  }
+}
