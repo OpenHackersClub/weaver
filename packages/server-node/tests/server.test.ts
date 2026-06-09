@@ -1,6 +1,8 @@
+import { Effect } from "effect";
 import { LoroDoc } from "loro-crdt";
 import { WebSocket } from "ws";
 import { afterEach, beforeEach, expect, it } from "vitest";
+import { inMemoryStore, type SnapshotStore } from "../src/persistence.js";
 import { startServer, type RunningServer } from "../src/server.js";
 
 let server: RunningServer;
@@ -15,36 +17,74 @@ afterEach(async () => {
   await server.close();
 });
 
-/** Open a binary WS client against the running server and resolve once it's open. */
-function connect(docId: string): Promise<WebSocket> {
+/**
+ * A connected peer that mirrors a real `@weaver/sync` client: one `LoroDoc` fed
+ * by every inbound frame, plus local edits sent back as update frames.
+ *
+ * The `message` pump is attached at *construction* (before `open`), so no frame
+ * — including a catch-up snapshot the server pushes the instant we register — is
+ * ever missed in the gap between `open` and a later listener attach.
+ */
+interface Peer {
+  readonly ws: WebSocket;
+  readonly doc: LoroDoc;
+  /** Resolve once this peer's body text equals `text`. */
+  until(text: string): Promise<void>;
+}
+
+function connect(docId: string): Promise<Peer> {
   const ws = new WebSocket(`ws://127.0.0.1:${server.port}/ws/${docId}`);
   ws.binaryType = "arraybuffer";
   clients.push(ws);
+
+  const doc = new LoroDoc();
+  const waiters: Array<{ text: string; resolve: () => void }> = [];
+
+  ws.on("message", (data: ArrayBuffer) => {
+    doc.import(new Uint8Array(data));
+    const text = doc.getText("body").toString();
+    for (let i = waiters.length - 1; i >= 0; i -= 1) {
+      if (waiters[i]!.text === text) {
+        waiters[i]!.resolve();
+        waiters.splice(i, 1);
+      }
+    }
+  });
+
+  const peer: Peer = {
+    ws,
+    doc,
+    until: (text) =>
+      new Promise((resolve) => {
+        if (doc.getText("body").toString() === text) resolve();
+        else waiters.push({ text, resolve });
+      }),
+  };
+
   return new Promise((resolve, reject) => {
-    ws.on("open", () => resolve(ws));
+    ws.on("open", () => resolve(peer));
     ws.on("error", reject);
   });
 }
 
-/** The update frame a client would put on the wire after a local edit. */
-function edit(doc: LoroDoc, text: string): Uint8Array {
-  const from = doc.version();
-  const body = doc.getText("body");
+/** Apply a local edit and put the resulting update frame on the wire. */
+function edit(peer: Peer, text: string): void {
+  const from = peer.doc.version();
+  const body = peer.doc.getText("body");
   body.insert(body.length, text);
-  doc.commit();
-  return doc.export({ mode: "update", from });
+  peer.doc.commit();
+  peer.ws.send(peer.doc.export({ mode: "update", from }));
 }
 
-const bodyText = (doc: LoroDoc): string => doc.getText("body").toString();
+const bodyText = (peer: Peer): string => peer.doc.getText("body").toString();
 
-/** Resolve once `doc` (fed by ws frames) reaches `expected`. */
-function awaitText(ws: WebSocket, doc: LoroDoc, expected: string): Promise<void> {
-  return new Promise((resolve) => {
-    ws.on("message", (data: ArrayBuffer) => {
-      doc.import(new Uint8Array(data));
-      if (bodyText(doc) === expected) resolve();
-    });
-  });
+/** An in-memory store whose `load` is delayed, to widen the cold-hydrate window. */
+function delayedLoadStore(ms: number): SnapshotStore {
+  const inner = inMemoryStore();
+  return {
+    load: (docId) => inner.load(docId).pipe(Effect.delay(`${ms} millis`)),
+    save: inner.save,
+  };
 }
 
 it("answers GET /health", async () => {
@@ -54,56 +94,56 @@ it("answers GET /health", async () => {
 });
 
 it("relays a local edit between two ws peers and converges", async () => {
-  const aWs = await connect("demo");
-  const bWs = await connect("demo");
+  const a = await connect("demo");
+  const b = await connect("demo");
 
-  const bDoc = new LoroDoc();
-  const bConverged = awaitText(bWs, bDoc, "hello");
+  edit(a, "hello");
 
-  const aDoc = new LoroDoc();
-  aWs.send(edit(aDoc, "hello"));
-
-  await bConverged;
-  expect(bodyText(bDoc)).toBe("hello");
+  await b.until("hello");
+  expect(bodyText(b)).toBe("hello");
 });
 
 it("catches up a late joiner with the canonical snapshot", async () => {
-  const aWs = await connect("late");
-  const bWs = await connect("late");
+  const a = await connect("late");
+  const b = await connect("late");
 
-  // Drive an edit and wait for b to receive it — this proves the server has
-  // imported the frame into the canonical room before the late peer joins.
-  const bDoc = new LoroDoc();
-  const bGotIt = awaitText(bWs, bDoc, "early");
-  const aDoc = new LoroDoc();
-  aWs.send(edit(aDoc, "early"));
-  await bGotIt;
+  // Edit, then wait for b — proving the server imported it into the canonical
+  // room before the late peer joins.
+  edit(a, "early");
+  await b.until("early");
 
   // A fresh peer joining now must be brought current via the catch-up snapshot.
-  const cDoc = new LoroDoc();
-  const cWs = await connect("late");
-  const cCaughtUp = awaitText(cWs, cDoc, "early");
-  await cCaughtUp;
-  expect(bodyText(cDoc)).toBe("early");
+  const c = await connect("late");
+  await c.until("early");
+  expect(bodyText(c)).toBe("early");
+});
+
+it("buffers frames that arrive before a cold room finishes hydrating", async () => {
+  // Widen the cold-start window so the room can't be ready when the first frame
+  // lands; the frame must be buffered and drained, not dropped.
+  await server.close();
+  server = await startServer({ port: 0, store: delayedLoadStore(60) });
+
+  const a = await connect("cold");
+  edit(a, "buffered"); // sent while the room is still hydrating
+
+  // After the hydrate window, a fresh joiner must see the early edit via the
+  // catch-up snapshot — proving the early frame was buffered, not dropped.
+  await new Promise((r) => setTimeout(r, 150));
+  const b = await connect("cold");
+  await b.until("buffered");
+  expect(bodyText(b)).toBe("buffered");
 });
 
 it("isolates docs — an edit in one room never reaches another", async () => {
-  const aWs = await connect("room-a");
-  const bWs = await connect("room-b");
-
-  let bReceived = 0;
-  bWs.on("message", () => {
-    bReceived += 1;
-  });
-
+  const a = await connect("room-a");
+  const b = await connect("room-b");
   // A second peer in room-a confirms the edit was actually relayed somewhere.
-  const a2Ws = await connect("room-a");
-  const a2Doc = new LoroDoc();
-  const a2Converged = awaitText(a2Ws, a2Doc, "scoped");
+  const a2 = await connect("room-a");
 
-  const aDoc = new LoroDoc();
-  aWs.send(edit(aDoc, "scoped"));
-  await a2Converged;
+  edit(a, "scoped");
+  await a2.until("scoped");
 
-  expect(bReceived).toBe(0);
+  // If room-b were going to receive it, it would have in the same relay batch.
+  expect(bodyText(b)).toBe("");
 });

@@ -6,7 +6,11 @@ import { startServer } from "./server.js";
  *   - `PORT`            listen port (default 8787)
  *   - `WEAVER_DATA_DIR` if set, persist snapshots to this dir (else in-memory)
  */
-const port = Number(process.env.PORT ?? 8787);
+const parsedPort = Number(process.env.PORT);
+const port =
+  Number.isInteger(parsedPort) && parsedPort >= 0 && parsedPort <= 65535
+    ? parsedPort
+    : 8787;
 const dataDir = process.env.WEAVER_DATA_DIR;
 const store = dataDir ? fileStore(dataDir) : inMemoryStore();
 

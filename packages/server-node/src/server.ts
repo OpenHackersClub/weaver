@@ -55,7 +55,7 @@ export function startServer(options: ServerOptions = {}): Promise<RunningServer>
     }
     const docId = decodeURIComponent(match[1]!);
     wss.handleUpgrade(req, socket, head, (ws) => {
-      void onConnection(registry, docId, ws);
+      onConnection(registry, docId, ws);
     });
   });
 
@@ -77,22 +77,52 @@ export function startServer(options: ServerOptions = {}): Promise<RunningServer>
 /**
  * Per-connection setup — mirrors `WeaverSyncDO.fetch`: register the peer, push
  * the catch-up snapshot, then relay every inbound frame.
+ *
+ * Resolving the room is async (a cold room hydrates from the store), but the
+ * socket is already live the instant `handleUpgrade` hands it over. Node's
+ * EventEmitter drops `message` events with no listener attached, so we wire the
+ * listeners **synchronously** and buffer any frames that arrive during room
+ * setup, then drain them in order once the room is ready — otherwise a client
+ * that sends immediately on `open` (as `@weaver/sync` does) could have its first
+ * edit silently lost. The Cloudflare DO has no such gap; its hibernation API
+ * dispatches messages through a single handler.
  */
-async function onConnection(
-  registry: RoomRegistry,
-  docId: string,
-  ws: WebSocket,
-): Promise<void> {
-  const room = await registry.get(docId);
+function onConnection(registry: RoomRegistry, docId: string, ws: WebSocket): void {
   const peer = wsPeer(ws);
-  room.register(peer);
+  let room: SyncRoom | null = null;
+  let closed = false;
+  const buffered: Uint8Array[] = [];
 
-  const snapshot = room.catchUpSnapshot();
-  if (snapshot) peer.send(snapshot);
+  ws.on("message", (data: RawData) => {
+    const frame = toBytes(data);
+    if (room) void relayFrame(registry, docId, room, peer, frame);
+    else buffered.push(frame);
+  });
+  ws.on("close", () => {
+    closed = true;
+    if (room) room.unregister(peer.id);
+  });
+  ws.on("error", () => {
+    closed = true;
+    if (room) room.unregister(peer.id);
+  });
 
-  ws.on("message", (data: RawData) => void relayFrame(registry, docId, room, peer, data));
-  ws.on("close", () => room.unregister(peer.id));
-  ws.on("error", () => room.unregister(peer.id));
+  void (async () => {
+    const resolved = await registry.get(docId);
+    // The socket may have closed while the room was still hydrating; never
+    // register a dead peer (it would leak in the relay set forever).
+    if (closed) return;
+    room = resolved;
+    room.register(peer);
+
+    const snapshot = room.catchUpSnapshot();
+    if (snapshot) peer.send(snapshot);
+
+    // Drain frames received during setup, in arrival order.
+    for (const frame of buffered.splice(0)) {
+      void relayFrame(registry, docId, room, peer, frame);
+    }
+  })();
 }
 
 /**
@@ -105,9 +135,8 @@ async function relayFrame(
   docId: string,
   room: SyncRoom,
   peer: PeerConnection,
-  data: RawData,
+  frame: Uint8Array,
 ): Promise<void> {
-  const frame = toBytes(data);
   const merged = await Effect.runPromise(
     room.receiveFrame(peer, frame).pipe(
       Effect.as(true),

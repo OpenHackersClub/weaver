@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { Effect, Schema } from "effect";
 
@@ -62,12 +62,21 @@ export function fileStore(dir: string): SnapshotStore {
       Effect.tryPromise({
         try: async () => {
           await mkdir(dir, { recursive: true });
-          await writeFile(pathFor(docId), bytes);
+          // Write to a temp file then rename — rename is atomic on a single
+          // filesystem, so a crash (or a concurrent reader) never sees a torn
+          // half-written snapshot.
+          const finalPath = pathFor(docId);
+          const tmpPath = `${finalPath}.tmp-${process.pid}-${(tmpCounter += 1)}`;
+          await writeFile(tmpPath, bytes);
+          await rename(tmpPath, finalPath);
         },
         catch: (cause) => new SnapshotStoreError({ docId, op: "save", cause }),
       }),
   };
 }
+
+/** Monotonic suffix to keep concurrent temp-file names distinct within a process. */
+let tmpCounter = 0;
 
 function isNotFound(cause: unknown): boolean {
   return (
