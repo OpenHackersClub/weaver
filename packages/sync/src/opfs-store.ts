@@ -183,7 +183,13 @@ export const createIndexedDbOpfsStore = (
         try: () =>
           tx<IDBValidKey>(OPS, "readwrite", (s) =>
             // Compound key prefix lets `loadOps` range-scan and `saveSnapshot`
-            // range-delete without an index.
+            // range-delete without an index. `Date.now()` is only a
+            // best-effort ordering hint, NOT a correctness guarantee: a
+            // backward clock jump (or two appends in the same millisecond)
+            // can sort a later op before an earlier one. That's fine — Loro
+            // import is version-ordered and idempotent, so replaying ops in
+            // any order converges to the same state. The random suffix only
+            // disambiguates same-millisecond keys.
             s.add(opsBytes, `${docId}:${Date.now()}-${Math.random()}`),
           ).then(() => undefined),
         catch: failWith("appendOps", docId),

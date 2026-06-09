@@ -68,6 +68,11 @@ export const createWsBridge = (options: WsBridgeOptions = {}): WsBridge => {
   let state: ConnectionState = { _kind: "Disconnected" };
   let attempt = 0;
   let intentionalClose = false;
+  // Sticky once we've reached OPEN. Gates auto-reconnect: a *failed initial
+  // connect* is owned by the caller's retry policy (`defaultConnectRetry`),
+  // which races with `scheduleReconnect` and double-dials. Only auto-reconnect
+  // drops of a connection that actually established.
+  let everConnected = false;
   const handlers = new Set<ReceiveHandler>();
 
   const scheduleReconnect = () => {
@@ -95,6 +100,7 @@ export const createWsBridge = (options: WsBridgeOptions = {}): WsBridge => {
 
         ws.onopen = () => {
           attempt = 0;
+          everConnected = true;
           state = { _kind: "Connected" };
           resume(Effect.void);
         };
@@ -136,6 +142,13 @@ export const createWsBridge = (options: WsBridgeOptions = {}): WsBridge => {
         ws.onclose = () => {
           socket = null;
           if (intentionalClose) {
+            state = { _kind: "Disconnected" };
+            return;
+          }
+          // A close before we ever opened means the *initial* connect failed
+          // — `onerror` already rejected the connect Effect, so the caller's
+          // retry owns re-dialing. Scheduling here too would double-dial.
+          if (!everConnected) {
             state = { _kind: "Disconnected" };
             return;
           }

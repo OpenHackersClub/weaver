@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   createInMemoryOpfsStore,
   initSync,
+  type OpfsStore,
   type WsBridge,
   type ReceiveHandler,
 } from "../src/index.js";
@@ -87,6 +88,35 @@ describe("@weaver/sync / initSync — persistence", () => {
     expect(opsAfter.length).toBe(0);
 
     await Effect.runPromise(handle.dispose());
+  });
+
+  it("drains in-flight async op writes before dispose resolves", async () => {
+    // Wrap the in-memory store so `appendOps` settles on a macrotask — the
+    // real IndexedDB / WS write latency the fire-and-forget path has to
+    // tolerate. Without draining in `dispose`, the trailing op is lost.
+    const inner = createInMemoryOpfsStore();
+    const slowStore: OpfsStore = {
+      ...inner,
+      appendOps: (docId, bytes) =>
+        Effect.flatMap(
+          Effect.promise(() => new Promise((r) => setTimeout(r, 5))),
+          () => inner.appendOps(docId, bytes),
+        ),
+    };
+    const docId = "doc-drain";
+
+    const doc = newDoc(1n);
+    const handle = await Effect.runPromise(
+      initSync(doc, { docId, store: slowStore }),
+    );
+
+    writeSomeText(doc, "body", "trailing edit");
+    // Dispose immediately — do NOT wait a tick. The pending `appendOps` is
+    // still in flight; `dispose` must await it.
+    await Effect.runPromise(handle.dispose());
+
+    const ops = await Effect.runPromise(slowStore.loadOps(docId));
+    expect(ops.length).toBeGreaterThan(0);
   });
 });
 

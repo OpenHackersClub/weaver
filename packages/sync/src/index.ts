@@ -92,11 +92,19 @@ export const initSync = (
 ): Effect.Effect<SyncHandle, OpfsStoreError | WsBridgeError | SyncInitError> =>
   Effect.gen(function* () {
     const { docId, wsUrl } = options;
+    // TODO(ADR 0007): the stores + bridge are injected as plain functions
+    // today. ADR 0007 (Effect-TS at the boundaries) commits to Layer-based
+    // DI — once `@weaver/server` lands, lift `OpfsStore`/`WsBridge` to
+    // `Effect.Tag` services and provide them via `Layer` instead of args.
     const store = options.store ?? createIndexedDbOpfsStore();
     const bridge = options.bridge ?? (wsUrl ? createWsBridge() : null);
     const snapshotEveryNOps = options.snapshotEveryNOps ?? 50;
 
     // 1. Rehydrate. Snapshot first (cheap), then ops on top.
+    // TODO(perf): this re-imports the full snapshot + every stored op on
+    // each load — O(n) in the op-log length. Once profiled, skip the
+    // re-import when the doc's version vector already dominates the stored
+    // state (tracked for a follow-up; harmless today at MVP doc sizes).
     const snapshot = yield* store.loadSnapshot(docId);
     if (snapshot) {
       yield* Effect.try({
@@ -120,6 +128,16 @@ export const initSync = (
     let lastExportedVersion = doc.version();
     let opsSinceSnapshot = 0;
 
+    // Track in-flight fire-and-forget writes so `dispose` can drain them.
+    // Without this, a rapid edit→dispose (e.g. on `beforeunload`) drops the
+    // trailing ops: the IndexedDB store and real WS send settle async and
+    // may not have flushed when the subscription is torn down.
+    const pending = new Set<Promise<unknown>>();
+    const track = (p: Promise<unknown>): void => {
+      pending.add(p);
+      void p.finally(() => pending.delete(p));
+    };
+
     const flushSnapshot = (): Effect.Effect<void, OpfsStoreError> =>
       Effect.gen(function* () {
         const bytes = doc.export({ mode: "snapshot" });
@@ -142,27 +160,33 @@ export const initSync = (
 
       // Fire-and-forget: persistence + transport are independent. Failures
       // are logged but don't crash the editor — local-first is the default.
-      void Effect.runPromise(
-        store
-          .appendOps(docId, delta)
-          .pipe(Effect.catchAll((e) => Effect.logError("opfs append failed", e))),
+      track(
+        Effect.runPromise(
+          store
+            .appendOps(docId, delta)
+            .pipe(Effect.catchAll((e) => Effect.logError("opfs append failed", e))),
+        ),
       );
 
       if (bridge) {
-        void Effect.runPromise(
-          bridge.send(delta).pipe(
-            Effect.catchTag("WsBridgeError", (e) =>
-              Effect.logWarning("ws send failed (will retry on reconnect)", e),
+        track(
+          Effect.runPromise(
+            bridge.send(delta).pipe(
+              Effect.catchTag("WsBridgeError", (e) =>
+                Effect.logWarning("ws send failed (will retry on reconnect)", e),
+              ),
             ),
           ),
         );
       }
 
       if (opsSinceSnapshot >= snapshotEveryNOps) {
-        void Effect.runPromise(
-          flushSnapshot().pipe(
-            Effect.catchAll((e) =>
-              Effect.logError("snapshot flush failed", e),
+        track(
+          Effect.runPromise(
+            flushSnapshot().pipe(
+              Effect.catchAll((e) =>
+                Effect.logError("snapshot flush failed", e),
+              ),
             ),
           ),
         );
@@ -191,8 +215,12 @@ export const initSync = (
 
       dispose: () =>
         Effect.gen(function* () {
+          // Stop the subscription first so no new writes are scheduled while
+          // we drain, then await the in-flight ones (each already recovers
+          // its own errors, so the combined promise never rejects).
           docSub();
           if (unsubscribeWs) unsubscribeWs();
+          yield* Effect.promise(() => Promise.all([...pending]));
           if (bridge) yield* bridge.disconnect();
         }),
 
