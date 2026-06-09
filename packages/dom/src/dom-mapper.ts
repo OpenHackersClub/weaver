@@ -103,6 +103,17 @@ export const wrapWithMarks = (
     span.appendChild(node);
     node = span;
   }
+  if (attrs["comment-anchor"]) {
+    // Lexical's MarkNode analog (specs/lexical-parity.md §2): the span only
+    // carries the thread hook; highlight styling and the thread UI are the
+    // app's job.
+    const span = doc.createElement("span");
+    span.className = "weaver-comment";
+    const val = attrs["comment-anchor"] as { threadId?: string } | undefined;
+    if (val?.threadId) span.setAttribute("data-comment-thread", val.threadId);
+    span.appendChild(node);
+    node = span;
+  }
   if (attrs["agent-pending"]) {
     const span = doc.createElement("span");
     span.className = "weaver-agent-pending";

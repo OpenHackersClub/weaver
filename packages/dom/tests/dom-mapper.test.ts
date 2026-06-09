@@ -233,3 +233,31 @@ describe("@weaver/dom / agent-pending mark rendering", () => {
     expect(falsy).toBeInstanceOf(Text);
   });
 });
+
+describe("@weaver/dom / comment-anchor mark rendering", () => {
+  it("wraps an anchored run in span.weaver-comment[data-comment-thread]", () => {
+    const node = wrapWithMarks(document, "annotated", {
+      "comment-anchor": { threadId: "t-1" },
+    });
+    expect(node).toBeInstanceOf(HTMLSpanElement);
+    const span = node as HTMLSpanElement;
+    expect(span.classList.contains("weaver-comment")).toBe(true);
+    expect(span.getAttribute("data-comment-thread")).toBe("t-1");
+    expect(span.textContent).toBe("annotated");
+  });
+
+  it("nests formatting marks inside the comment span", () => {
+    const node = wrapWithMarks(document, "bold note", {
+      bold: true,
+      "comment-anchor": { threadId: "t-2" },
+    });
+    const span = node as HTMLSpanElement;
+    expect(span.classList.contains("weaver-comment")).toBe(true);
+    expect(span.querySelector("strong")?.textContent).toBe("bold note");
+  });
+
+  it("does not wrap when comment-anchor is absent or falsy", () => {
+    const plain = wrapWithMarks(document, "hi", {});
+    expect(plain).toBeInstanceOf(Text);
+  });
+});

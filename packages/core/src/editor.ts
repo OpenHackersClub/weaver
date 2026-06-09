@@ -48,6 +48,11 @@ const DEFAULT_TEXT_STYLES = {
   // either edge should NOT extend the mark (Lexical's TypeaheadMenuPlugin
   // mention nodes behave the same way).
   mention: { expand: "none" as const },
+  // Comment anchors (Lexical's MarkNode; specs/lexical-parity.md §2) pin a
+  // thread to the exact range the author selected — typing at either edge
+  // must not grow the annotated span. The mark VALUE is `{ threadId }`; the
+  // thread payload lives in a sibling LoroDoc container, not in the mark.
+  "comment-anchor": { expand: "none" as const },
 };
 
 /** Every mark key the editor knows about — used to clear all formatting. */
@@ -94,7 +99,8 @@ export type MarkKind =
   | "link"
   | "highlight"
   | "agent-pending"
-  | "mention";
+  | "mention"
+  | "comment-anchor";
 
 export type EditorOrigin = "user" | "agent" | "system" | (string & {});
 
@@ -439,6 +445,14 @@ const validateMarkValue = (mark: MarkKind, value: unknown): void => {
     ) {
       throw new Error(
         "mention mark requires `{ userId, label }` with non-empty strings",
+      );
+    }
+  }
+  if (mark === "comment-anchor") {
+    const v = value as { threadId?: unknown } | undefined;
+    if (!v || typeof v.threadId !== "string" || v.threadId.length === 0) {
+      throw new Error(
+        "comment-anchor mark requires `{ threadId }` with a non-empty string",
       );
     }
   }
