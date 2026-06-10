@@ -774,6 +774,12 @@ hr.weaver-divider {
   font-weight: 600;
 }
 
+.mention-toast-question {
+  font-size: 12px;
+  font-style: italic;
+  margin: 2px 0;
+}
+
 .mention-toast-meta {
   font-size: 11px;
   opacity: 0.6;

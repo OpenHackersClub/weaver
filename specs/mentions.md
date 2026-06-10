@@ -58,6 +58,7 @@ editor.events.on(
 - Programmatic mention application (`toggleMark` / `mark.update` with `mark: "mention"` — e.g. an agent tagging someone) emits the same event; toggling a mention **off** does not.
 - Listeners are isolated: a throwing subscriber is logged and skipped — it can neither starve other subscribers nor propagate into the editor command that emitted.
 - Scope note: the hub observes this editor's *commands*, not the CRDT — a mention merged in from a remote peer's sync update does not (yet) emit locally. Cross-peer mention notification belongs to the sync/notification layer and is future work.
+- **Capturing intent, not chips**: `MentionCreated` fires when the chip lands — usually *before* the sentence around it is finished ("@Agent Richard what is our latest spending?"). A consumer that feeds an LLM (or notifies a person with context) should not react per-event; it should debounce on subsequent edit-quiescence of the tagged block, then read the full block text and take everything after the chip as the question. The Playground's "Tag someone" example (`MentionIntents`) is the reference implementation of this pattern.
 
 ## Known v1 limitations
 
@@ -76,4 +77,4 @@ editor.events.on(
 - `packages/core/tests/insert-mention.test.ts` — atomic replace/mark/undo semantics.
 - `packages/dom/tests/mention-trigger.test.ts` — trigger scan rules + bridge lifecycle.
 - `apps/playground/tests/acceptance/mentions.spec.ts` — full browser flow: open, filter, keyboard/click insert, debounced batch delivery.
-- `apps/playground/tests/acceptance/mentions-showcase.spec.ts` — the "Tag someone" example: one tag → instant per-event toast (`MentionNotifications`, no debounce) and the same event debounced into the sidebar log; a burst → N toasts but one log batch.
+- `apps/playground/tests/acceptance/mentions-showcase.spec.ts` — the "Tag someone" example: tagging an agent then finishing the sentence captures the FULL question after typing goes quiet (no per-keystroke reaction), while the sidebar log receives the raw events debounced into one batch.

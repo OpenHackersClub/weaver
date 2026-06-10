@@ -40,7 +40,7 @@ export const EXAMPLES: ReadonlyArray<ExampleDef> = [
     id: "mentions",
     label: "Tag someone",
     description:
-      "Type @ to tag a person or agent — every tag fires a MentionCreated event.",
+      "Tag a person or agent with @ and finish your sentence — the event consumer debounces until you pause, then captures the full question.",
   },
 ];
 
@@ -153,9 +153,16 @@ export const seedExample = (editor: Editor, id: ExampleId): void => {
         2,
         "paragraph",
         {},
-        "Type @ below and pick a person or agent. Each tag pops a notification toast instantly (per-event delivery), and the Mentions panel in the sidebar logs the same events debounced — a burst arrives there as one batch.",
+        "The chip lands before your sentence is finished — so the consumer here does NOT react per keystroke. It waits until the tagged block goes quiet, then captures the full question after the tag (the intent an LLM would process). Try: @ pick an agent, then keep typing “what is our latest spending?” and pause.",
       );
-      seedBlock(editor, 3, "paragraph", {}, "Try it here: ");
+      seedBlock(
+        editor,
+        3,
+        "paragraph",
+        {},
+        "The Mentions panel in the sidebar logs the raw events too, debounced — a burst of tags arrives there as one batch.",
+      );
+      seedBlock(editor, 4, "paragraph", {}, "Try it here: ");
     }),
     Match.when("agent", () => {
       replaceFirstBlock(editor, "heading", { level: 1 }, "Agent collaboration demo");
