@@ -738,6 +738,39 @@ hr.weaver-divider {
   opacity: 0.6;
 }
 
+.mention-toasts {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 30;
+  pointer-events: none;
+}
+
+.mention-toast {
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--panel-bg, var(--bg));
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.15);
+}
+
+.mention-toast-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.mention-toast-meta {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
 .mentions-log-empty {
   font-size: 12px;
   opacity: 0.7;
