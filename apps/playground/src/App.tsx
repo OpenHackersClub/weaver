@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { getBlock, getChildren, rootId } from "@weaver/core";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPresenceHub, getBlock, getChildren, rootId } from "@weaver/core";
 import { EditorRoot, MentionMenu, useEditor, useMentions } from "@weaver/react";
 import { EXAMPLES, seedExample, type ExampleId } from "./examples.js";
 import { PLAYGROUND_PRINCIPALS } from "./principals.js";
@@ -9,7 +9,7 @@ import { DebugPanels } from "./debug-panels.js";
 import { createRuntime } from "./agents/runtime.js";
 import { AgentsPanel } from "./agents/agents-panel.js";
 import { PresenceLayer } from "./agents/presence-layer.js";
-import { CollabSession } from "./collab.js";
+import { CollabSession, WIRE_PRESENCE_TIMEOUT_MS } from "./collab.js";
 
 const ALL_DEBUG_PANELS: ReadonlyArray<DebugPanelId> = ["tree", "ops", "vv", "fps"];
 
@@ -96,7 +96,18 @@ export const App = () => {
   // CollabSession seeds once if the room turns out to be genuinely empty.
   const editor = useEditor({ origin: "user", seed: collab === null });
   const mentions = useMentions(editor, { principals: PLAYGROUND_PRINCIPALS });
-  const [runtime] = useState(() => createRuntime(editor));
+  // One presence roster per tab: in collab mode a single wire-timeout hub is
+  // shared by the human session (CollabSession/usePresence) AND the mock-agent
+  // runtime, so agents land in the same facepile and ride the same socket.
+  // CollabSession owns its teardown; the runtime only disposes a hub it made.
+  const [wireHub] = useState(() =>
+    initial.ws !== null
+      ? createPresenceHub({ timeoutMs: WIRE_PRESENCE_TIMEOUT_MS })
+      : null,
+  );
+  const [runtime] = useState(() =>
+    createRuntime(editor, wireHub !== null ? { presence: wireHub } : {}),
+  );
   const [example, setExample] = useState<ExampleId>(initial.example);
   const [debug, setDebug] = useState<ReadonlySet<DebugPanelId>>(initial.debug);
   const [theme, setTheme] = useState<"light" | "dark">(initial.theme);
@@ -118,13 +129,29 @@ export const App = () => {
   // Reseed the visitor's doc on example change. `reset` first stops every
   // agent and clears its internal state so the reseed starts from a clean
   // slate; the agent count is then (re)applied by the effect below.
-  // In collab mode the shared doc is the relay's canonical state — local
-  // seeding would duplicate content into every connected tab, so skip it.
+  // In collab mode the *initial* content is the relay's canonical state, so
+  // the on-load seed is skipped (CollabSession seeds a fresh room instead) —
+  // but an explicit example click reseeds the shared doc, and the change
+  // syncs to every connected tab like any other edit.
+  const seededOnce = useRef(false);
   useEffect(() => {
-    if (collab) return;
+    if (collab && !seededOnce.current) {
+      seededOnce.current = true;
+      return;
+    }
+    seededOnce.current = true;
     runtime.reset();
     seedExample(editor, example);
   }, [editor, runtime, example, collab]);
+
+  // What CollabSession seeds into a genuinely fresh (or unreachable) room —
+  // the currently-selected example, read through a ref so a pending example
+  // click isn't lost between connect and seed.
+  const exampleRef = useRef(example);
+  exampleRef.current = example;
+  const seedIfEmpty = useCallback(() => {
+    seedExample(editor, exampleRef.current);
+  }, [editor]);
 
   useEffect(() => {
     runtime.setCount(agents);
@@ -228,17 +255,19 @@ export const App = () => {
             hostRef={mentions.hostRef}
           />
           <MentionMenu mentions={mentions} />
-          {/* Mock-agent carets are a single-tab demo affordance; in collab mode
-              CollabSession owns the overlay (one layer per host), so skip this. */}
+          {/* One overlay per host: in collab mode CollabSession renders the
+              shared hub (humans + agents); this layer covers single-user. */}
           {collab ? null : (
             <PresenceLayer editor={editor} presence={runtime.presence} />
           )}
-          {collab ? (
+          {collab !== null && wireHub !== null ? (
             <CollabSession
               editor={editor}
+              hub={wireHub}
               wsUrl={collab.wsUrl}
               docId={collab.docId}
               self={collab.self}
+              seedIfEmpty={seedIfEmpty}
             />
           ) : null}
         </main>

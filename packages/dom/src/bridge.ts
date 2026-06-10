@@ -269,6 +269,25 @@ export const attachEditor = (
   };
 
   const onSelectionChange = (): void => {
+    // Mirror the user's live caret into the core selection state so
+    // `useSelection` consumers (toolbars, presence cursors) track clicks and
+    // arrow keys, not just programmatic ops — Lexical's
+    // SELECTION_CHANGE_COMMAND parity. Guarded by value equality: the
+    // browser fires `selectionchange` generously (including after our own
+    // rerenders restore the caret), and an unconditional `set` would notify
+    // every subscriber per event. A selection outside the host leaves the
+    // editor's state alone — blur must not drop the caret.
+    const range = readDomSelection(host);
+    if (range) {
+      const cur = editor.commands.selection.get();
+      const unchanged =
+        cur !== null &&
+        cur.anchor.blockId === range.anchor.blockId &&
+        cur.anchor.offset === range.anchor.offset &&
+        cur.focus.blockId === range.focus.blockId &&
+        cur.focus.offset === range.focus.offset;
+      if (!unchanged) editor.commands.selection.set(range);
+    }
     notifyMentionTrigger();
   };
 

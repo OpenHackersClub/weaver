@@ -12,7 +12,9 @@ export interface UrlState {
   /**
    * Collab mode (`specs/presence.md` §Playground demo): WebSocket relay URL
    * (`?ws=ws://127.0.0.1:8787`), shared doc id, and which demo principal this
-   * tab is. All `null`/defaulted when absent — collab is opt-in.
+   * tab is. Collab is ON by default — in dev the default relay is the local
+   * `dev:sync` server; prod builds default to `VITE_WEAVER_WS_URL` when set,
+   * else stay single-user. `?ws=off` opts out explicitly.
    */
   readonly ws: string | null;
   readonly doc: string;
@@ -21,6 +23,15 @@ export interface UrlState {
 
 const ALL_DEBUG: ReadonlySet<DebugPanelId> = new Set(["tree", "ops", "vv", "fps"]);
 const DEFAULT_EXAMPLE: ExampleId = "demo";
+
+/**
+ * The relay every tab connects to when the URL doesn't say otherwise.
+ * Acceptance tests run against `vite preview` (a prod build with no
+ * `VITE_WEAVER_WS_URL`), so they stay single-user unless a spec passes `?ws=`.
+ */
+const DEFAULT_WS: string | null =
+  (import.meta.env["VITE_WEAVER_WS_URL"] as string | undefined) ??
+  (import.meta.env.DEV ? "ws://127.0.0.1:8787" : null);
 
 export const readUrlState = (search: string): UrlState => {
   const params = new URLSearchParams(search);
@@ -50,7 +61,8 @@ export const readUrlState = (search: string): UrlState => {
     agents = example === "agent" ? 2 : 0;
   }
 
-  const ws = params.get("ws");
+  const rawWs = params.get("ws");
+  const ws = rawWs === "off" ? null : (rawWs ?? DEFAULT_WS);
   const doc = params.get("doc") ?? "playground";
   const me = params.get("me");
 
@@ -66,9 +78,13 @@ export const writeUrlState = (state: UrlState): void => {
   if (state.theme === "dark") params.set("theme", "dark");
   if (state.agents > 0) params.set("agents", String(state.agents));
   if (state.ws !== null) {
-    params.set("ws", state.ws);
+    // The default relay stays out of the URL — only deviations are pinned.
+    if (state.ws !== DEFAULT_WS) params.set("ws", state.ws);
     if (state.doc !== "playground") params.set("doc", state.doc);
     if (state.me !== null) params.set("me", state.me);
+  } else if (DEFAULT_WS !== null) {
+    // Collab would re-engage on reload unless the opt-out is made explicit.
+    params.set("ws", "off");
   }
   const next = `?${params.toString()}`;
   if (window.location.search !== next) {

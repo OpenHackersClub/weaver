@@ -1,4 +1,5 @@
 import { Effect, Either, Schema } from "effect";
+import { decodeImportBlobMeta, VersionVector } from "loro-crdt";
 import type { LoroDoc, Subscription } from "loro-crdt";
 import type { PresenceHub } from "@weaver/core";
 import { FrameKind, decodeFrame, encodeFrame } from "@weaver/sync-core";
@@ -37,9 +38,11 @@ export {
  *
  * Pipeline per spec (`specs/architecture.md#6`, `specs/presence.md`):
  *   1. On init: replay snapshot + tail of ops from `OpfsStore` into `doc`.
- *   2. Subscribe to `doc.subscribe(...)`. For every LOCAL batch, export the
- *      delta and (a) append it to OPFS untagged, (b) push it down the WS
- *      bridge as a tagged `doc` frame.
+ *   2. Subscribe to `doc.subscribe(...)`. For every batch born in this tab
+ *      (local commits + imports from in-tab peer editors, e.g. mock-agent
+ *      peers), export the delta and (a) append it to OPFS untagged, (b) push
+ *      it down the WS bridge as a tagged `doc` frame. Wire-applied imports
+ *      are excluded — they must not loop back out.
  *   3. For every inbound WS frame, demux on the kind tag: `doc` bodies import
  *      into `doc` (CRDT merge), `presence` bodies apply into the optional
  *      `PresenceHub`.
@@ -161,15 +164,29 @@ export const initSync = (
       });
 
     const docSub: Subscription = doc.subscribe((batch) => {
-      // Only forward LOCAL edits. Imported ops (from the wire OR replayed
-      // from storage) must not loop back out to storage/wire.
-      if (batch.by !== "local") return;
+      // Forward every edit born in this tab: local commits AND imports from
+      // in-tab peer editors wired by `connectPeers` (the Playground's mock
+      // agents reach this doc as `by: "import"` — they're distinct CRDT peers,
+      // and their ops must ride the wire like anyone else's).
+      //
+      // Wire-applied ops must NOT loop back out, but events can't attribute
+      // them: Loro defers emission when an import lands inside another event
+      // callback, so a flag around `doc.import` misses. Attribution is by
+      // VERSION instead — the wire handler below advances the
+      // `lastExportedVersion` watermark past everything it applies, so by the
+      // time an event for those ops fires the delta is empty and the batch is
+      // skipped. In-tab peers' counters are never advanced that way, so their
+      // ops always export. Storage replay happens before this subscription
+      // attaches and is covered by the same watermark.
+      if (batch.by === "checkout") return;
+      const current = doc.version();
+      if (current.compare(lastExportedVersion) === 0) return;
 
       const delta = doc.export({
         mode: "update",
         from: lastExportedVersion,
       });
-      lastExportedVersion = doc.version();
+      lastExportedVersion = current;
       opsSinceSnapshot += 1;
 
       // Fire-and-forget: persistence + transport are independent. Failures
@@ -207,8 +224,8 @@ export const initSync = (
       }
     });
 
-    // 3. Inbound WS frames → demux on the kind tag. Doc imports trigger a
-    //    non-local batch, which the subscriber above will correctly ignore;
+    // 3. Inbound WS frames → demux on the kind tag. Doc imports advance the
+    //    export watermark so the subscriber above never loops them back out;
     //    presence applies never re-fire the hub's local-update listener.
     // 4. Locally-originated presence updates → tagged presence frames.
     let unsubscribeWs: (() => void) | null = null;
@@ -224,8 +241,29 @@ export const initSync = (
           },
           onRight: ({ kind, body }) => {
             try {
-              if (kind === FrameKind.Doc) doc.import(body);
-              else presence?.applyRemote(body);
+              if (kind === FrameKind.Doc) {
+                // Fold the blob's version range into the export watermark
+                // BEFORE importing: Loro may emit the import's events
+                // synchronously (inside `doc.import`) or deferred (when the
+                // import lands nested in another event callback), so
+                // accounting up front is the only timing-proof attribution.
+                // Wire-delivered ops are by definition already known to the
+                // relay and must not be re-sent or re-persisted; in-tab
+                // peers' counters are untouched, so their ops still export.
+                const incoming = decodeImportBlobMeta(
+                  body,
+                  false,
+                ).partialEndVersionVector;
+                const merged = lastExportedVersion.toJSON();
+                for (const [peer, counter] of incoming.toJSON()) {
+                  const prev = merged.get(peer) ?? 0;
+                  if (counter > prev) merged.set(peer, counter);
+                }
+                lastExportedVersion = new VersionVector(merged);
+                doc.import(body);
+              } else {
+                presence?.applyRemote(body);
+              }
             } catch (e) {
               // Malformed body — log and drop. Op-validation in the DO
               // (Phase 2b) is the real defense; this is just hygiene.

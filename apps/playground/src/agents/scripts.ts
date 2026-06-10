@@ -16,7 +16,8 @@ export interface AgentScript {
   /**
    * Text chunks streamed one per playback tick. The runtime prepends a chunk
    * carrying the agent's id literal, so an agent's full contribution always
-   * contains its `agent-N` identity (the Playground rubric relies on this).
+   * contains its `agent-<name>` identity (the Playground rubric relies on
+   * this).
    */
   readonly chunks: ReadonlyArray<string>;
 }

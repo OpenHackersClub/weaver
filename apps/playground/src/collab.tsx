@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Effect } from "effect";
 import {
-  createPresenceHub,
   getChildren,
   rootId,
   type Editor,
+  type PresenceHub,
   type Principal,
 } from "@weaver/core";
 import {
@@ -12,7 +12,7 @@ import {
   initSync,
   type SyncHandle,
 } from "@weaver/sync";
-import { PresenceFacepile, usePresence } from "@weaver/react";
+import { PresenceFacepile, usePresence, useSelection } from "@weaver/react";
 import { PresenceLayer } from "./agents/presence-layer.js";
 
 /**
@@ -20,6 +20,12 @@ import { PresenceLayer } from "./agents/presence-layer.js";
  * visitor's editor + a short-timeout presence hub to a sync relay over one
  * WebSocket. Renders the who's-here facepile and a presence caret layer for
  * any remote record that carries a cursor.
+ *
+ * The hub is app-owned and SHARED with the mock-agent runtime, so agents and
+ * humans publish into one roster — one facepile, one caret overlay, and agent
+ * presence rides the wire to remote tabs. This component takes over the hub's
+ * teardown (see the dispose-ordering dance below); the runtime never disposes
+ * a hub it didn't create.
  *
  * Identity (`self`) is app-supplied — here, a demo principal picked by the
  * `?me=` param — exactly the mechanism/identity split the spec prescribes.
@@ -29,29 +35,45 @@ import { PresenceLayer } from "./agents/presence-layer.js";
  */
 
 /** Wire-mode eviction window; pairs with the `usePresence` 15 s heartbeat. */
-const WIRE_PRESENCE_TIMEOUT_MS = 45_000;
+export const WIRE_PRESENCE_TIMEOUT_MS = 45_000;
 
 export const CollabSession = ({
   editor,
+  hub,
   wsUrl,
   docId,
   self,
+  seedIfEmpty,
 }: {
   editor: Editor;
+  hub: PresenceHub;
   wsUrl: string;
   docId: string;
   self: Principal;
+  /** Seeds the currently-selected example; called once on a fresh room. */
+  seedIfEmpty: () => void;
 }) => {
-  const [hub] = useState(() =>
-    createPresenceHub({ timeoutMs: WIRE_PRESENCE_TIMEOUT_MS }),
-  );
   const [state, setState] = useState<"connecting" | "live" | "error">(
     "connecting",
   );
-  // Called for its publish/heartbeat side effect (publishes `self` into the hub
-  // and re-`set`s on an interval); the returned roster is rendered by the
-  // facepile from the hub directly, so the value here is intentionally unused.
-  usePresence(hub, { self });
+  // The local caret rides the presence record so remote peers render this
+  // session in their caret overlay too — cursors and the facepile must always
+  // draw from the same identity set (`specs/presence.md` §Playground demo).
+  const selection = useSelection(editor);
+  const cursor = useMemo(
+    () =>
+      selection === null
+        ? null
+        : {
+            blockId: selection.focus.blockId,
+            offset: selection.focus.offset,
+          },
+    [selection],
+  );
+  // Publishes `self` (+ live cursor) into the hub and re-`set`s on a
+  // heartbeat; the roster itself is rendered by the facepile from the hub
+  // directly, so only `selfPeerId` is consumed here.
+  const { selfPeerId } = usePresence(hub, { self, cursor });
 
   // The sync handle's teardown (`handle.dispose()`) is async and internally
   // unsubscribes from the hub's EphemeralStore. The hub-dispose effect below
@@ -111,22 +133,20 @@ export const CollabSession = ({
 
   // A genuinely fresh room has no blocks anywhere (the collab editor mounts
   // with `seed: false`). Give the catch-up snapshot a beat to land, then seed
-  // one paragraph so there's something to type into. If two tabs race this,
-  // the CRDT merge keeps both paragraphs — cosmetic, not corrupting.
+  // the selected example so a default room demos real content. If two tabs
+  // race this, the CRDT merge keeps both copies — cosmetic, not corrupting.
+  // On relay error no snapshot is coming, so seed immediately: the tab stays
+  // usable single-user, and edits merge later if the bridge reconnects.
   useEffect(() => {
-    if (state !== "live") return;
-    const timer = setTimeout(() => {
-      if (getChildren(editor, rootId(editor)).length === 0) {
-        editor.commands.block.insert({
-          parentId: rootId(editor),
-          index: 0,
-          kind: "paragraph",
-          attrs: {},
-        });
-      }
-    }, 500);
+    if (state === "connecting") return;
+    const timer = setTimeout(
+      () => {
+        if (getChildren(editor, rootId(editor)).length === 0) seedIfEmpty();
+      },
+      state === "live" ? 500 : 0,
+    );
     return () => clearTimeout(timer);
-  }, [state, editor]);
+  }, [state, editor, seedIfEmpty]);
 
   return (
     <>
@@ -136,7 +156,7 @@ export const CollabSession = ({
         </span>
         <PresenceFacepile hub={hub} />
       </div>
-      <PresenceLayer editor={editor} presence={hub} />
+      <PresenceLayer editor={editor} presence={hub} excludePeerId={selfPeerId} />
     </>
   );
 };

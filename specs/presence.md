@@ -104,4 +104,8 @@ const { peers } = usePresence(hub, { self: principal }); // publishes self + hea
 
 ## Playground demo
 
-`?ws=ws://127.0.0.1:8787&doc=<id>&me=user:ada` puts the Playground in collab mode: the `me` principal comes from the demo directory (`apps/playground/src/principals.ts`), the facepile renders in the surface header, and two tabs on the same `doc` see each other live. `pnpm --filter @weaver/playground dev:sync` runs the local relay.
+Collab mode is the Playground's default: dev builds connect to the local relay (`ws://127.0.0.1:8787`, run via `pnpm --filter @weaver/playground dev:sync`) without any URL params; prod builds use `VITE_WEAVER_WS_URL` when set at build time, else stay single-user. `?ws=<origin>` overrides the relay, `?ws=off` opts out entirely. The `me` principal comes from the demo directory (`apps/playground/src/principals.ts`, defaulting to a random human per tab), the facepile renders in the surface header, and two tabs on the same `doc` see each other live.
+
+Mock AI agents share the tab's wire-connected presence hub: an enabled agent publishes under a session-scoped key (`agent-richard#<session>`) with its stable id as `principalId`, so agents appear in every connected tab's facepile and caret overlay alongside humans — one roster, no separate agent presence channel.
+
+**Cursors and the facepile always draw from the same identity set.** Every session — human or agent — publishes one `PresenceRecord`; the facepile renders all of them (deduped by `principalId`), the caret overlay renders the subset that carries a `cursor` (humans publish their live caret from the editor selection via `usePresence({ cursor })`, agents from their streaming position). A session's own caret is excluded locally — it's the real DOM caret. There is no second roster and no cursor channel separate from presence.

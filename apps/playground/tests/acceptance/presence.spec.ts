@@ -88,8 +88,8 @@ test.describe("Presence over the wire", () => {
     const a = await openTab(browser, "presence-edits", "user:ada");
     const b = await openTab(browser, "presence-edits", "user:grace");
 
-    // A fresh room is seeded with one paragraph shortly after connect; typing
-    // before any block exists has no model target, so wait for it.
+    // A fresh room is seeded with the selected example shortly after connect;
+    // typing before any block exists has no model target, so wait for it.
     const editorA = a.page.locator("[data-weaver-root]");
     await expect(editorA.locator("[data-block-id]").first()).toBeVisible();
     await editorA.click();
@@ -107,6 +107,33 @@ test.describe("Presence over the wire", () => {
     await expect(a.page.locator("[data-weaver-root]")).toContainText(
       "hi, grace here",
     );
+
+    await a.context.close();
+    await b.context.close();
+  });
+
+  test("a tab's caret appears in the other tab's overlay — cursors and facepile share one identity set", async ({
+    browser,
+  }) => {
+    const a = await openTab(browser, "presence-carets", "user:ada");
+    const b = await openTab(browser, "presence-carets", "user:grace");
+
+    // Ada places a selection by clicking into the first block.
+    const editorA = a.page.locator("[data-weaver-root]");
+    await expect(editorA.locator("[data-block-id]").first()).toBeVisible();
+    await editorA.locator("[data-block-id]").first().click();
+
+    // Grace's tab renders Ada's caret (session-scoped peer key, principal
+    // prefix) — the same identity that her facepile entry carries.
+    await expect(
+      b.page.locator('[data-presence-peer^="user:ada"]'),
+    ).toBeVisible();
+    await expect(face(b.page, "user:ada")).toBeVisible();
+
+    // And never her own: the local caret is the real DOM caret.
+    await expect(
+      b.page.locator('[data-presence-peer^="user:grace"]'),
+    ).toHaveCount(0);
 
     await a.context.close();
     await b.context.close();

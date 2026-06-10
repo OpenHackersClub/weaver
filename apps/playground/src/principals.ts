@@ -9,7 +9,7 @@ export const PLAYGROUND_PRINCIPALS: ReadonlyArray<Principal> = [
   { id: "user:ada", kind: "user", label: "Ada Lovelace", color: "#8b5cf6" },
   { id: "user:grace", kind: "user", label: "Grace Hopper", color: "#f59e0b" },
   { id: "user:linus", kind: "user", label: "Linus Torvalds", color: "#0ea5e9" },
-  { id: "agent-1", kind: "agent", label: "Agent 1", color: "#e0245e" },
-  { id: "agent-2", kind: "agent", label: "Agent 2", color: "#1d9bf0" },
-  { id: "agent-3", kind: "agent", label: "Agent 3", color: "#17bf63" },
+  { id: "agent-richard", kind: "agent", label: "Agent Richard", color: "#e0245e" },
+  { id: "agent-jared", kind: "agent", label: "Agent Jared", color: "#1d9bf0" },
+  { id: "agent-erlich", kind: "agent", label: "Agent Erlich", color: "#17bf63" },
 ];
