@@ -261,3 +261,18 @@ describe("@weaver/dom / comment-anchor mark rendering", () => {
     expect(plain).toBeInstanceOf(Text);
   });
 });
+
+describe("@weaver/dom / comment-anchor zombie-span guard", () => {
+  it("renders no span when a raw op left the threadId missing", () => {
+    // A peer writing the mark via a raw Loro op (bypassing validateMarkValue)
+    // could omit threadId; a hook span no app can resolve must not render.
+    const missing = wrapWithMarks(document, "hi", {
+      "comment-anchor": {},
+    });
+    expect(missing).toBeInstanceOf(Text);
+    const nullish = wrapWithMarks(document, "hi", {
+      "comment-anchor": { threadId: "" },
+    });
+    expect(nullish).toBeInstanceOf(Text);
+  });
+});

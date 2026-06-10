@@ -81,8 +81,15 @@ describe("@weaver/core / comment-anchor mark", () => {
     editor.dispose();
   });
 
-  it("clearMarks strips comment anchors with the rest", () => {
+  it("clearMarks strips formatting but PRESERVES comment anchors", () => {
+    // block-model.md: comment-anchor is "Internal; … not exposed to
+    // formatting UI" — a clear-formatting action must not orphan a thread.
     const { editor, id } = editorWithText("hello");
+    editor.commands.text.toggleMark({
+      blockId: id,
+      range: { start: 0, end: 5 },
+      mark: "bold",
+    });
     editor.commands.text.toggleMark({
       blockId: id,
       range: { start: 0, end: 5 },
@@ -90,7 +97,51 @@ describe("@weaver/core / comment-anchor mark", () => {
       value: { threadId: "t-1" },
     });
     editor.commands.text.clearMarks({ blockId: id, range: { start: 0, end: 5 } });
-    expect(editor.commands.text.toDelta(id)).toEqual([{ insert: "hello" }]);
+    expect(editor.commands.text.toDelta(id)).toEqual([
+      { insert: "hello", attributes: { "comment-anchor": { threadId: "t-1" } } },
+    ]);
+    editor.dispose();
+  });
+
+  it("re-anchoring a fully-covered range to a different thread REPLACES the anchor", () => {
+    // The toggle-off coverage check must be value-aware: applying t-2 over an
+    // existing t-1 anchor replaces the binding instead of silently deleting it.
+    const { editor, id } = editorWithText("hello");
+    editor.commands.text.toggleMark({
+      blockId: id,
+      range: { start: 0, end: 5 },
+      mark: "comment-anchor",
+      value: { threadId: "t-1" },
+    });
+    editor.commands.text.toggleMark({
+      blockId: id,
+      range: { start: 0, end: 5 },
+      mark: "comment-anchor",
+      value: { threadId: "t-2" },
+    });
+    expect(editor.commands.text.toDelta(id)).toEqual([
+      { insert: "hello", attributes: { "comment-anchor": { threadId: "t-2" } } },
+    ]);
+    editor.dispose();
+  });
+
+  it("survives a split that bisects the anchored range", () => {
+    const { editor, id } = editorWithText("hello world");
+    editor.commands.text.toggleMark({
+      blockId: id,
+      range: { start: 3, end: 8 },
+      mark: "comment-anchor",
+      value: { threadId: "t-3" },
+    });
+    const tailId = editor.commands.block.split({ blockId: id, offset: 6 });
+    expect(editor.commands.text.toDelta(id)).toEqual([
+      { insert: "hel" },
+      { insert: "lo ", attributes: { "comment-anchor": { threadId: "t-3" } } },
+    ]);
+    expect(editor.commands.text.toDelta(tailId)).toEqual([
+      { insert: "wo", attributes: { "comment-anchor": { threadId: "t-3" } } },
+      { insert: "rld" },
+    ]);
     editor.dispose();
   });
 

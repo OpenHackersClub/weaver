@@ -55,15 +55,15 @@ const DEFAULT_TEXT_STYLES = {
   "comment-anchor": { expand: "none" as const },
 };
 
-/** Every mark key the editor knows about — used to clear all formatting. */
+/** Every mark key the editor knows about. */
 const MARK_KEYS = Object.keys(DEFAULT_TEXT_STYLES);
 
 /** Marks a paste may carry across documents. Internal marks are excluded:
- *  `agent-pending` points at a live agent session and `comment-anchor` (when
- *  it lands) at a thread container — neither exists in the target doc, so
- *  transplanting them would create dangling references. Unknown keys are
- *  dropped too: they'd be committed to the CRDT (and replicate to every
- *  peer) while being invisible to the renderer's allowlist. */
+ *  `agent-pending` points at a live agent session and `comment-anchor` at a
+ *  thread container — neither exists in the target doc, so transplanting
+ *  them would create dangling references. Unknown keys are dropped too:
+ *  they'd be committed to the CRDT (and replicate to every peer) while being
+ *  invisible to the renderer's allowlist. */
 const PASTEABLE_MARK_KEYS = new Set(
   MARK_KEYS.filter((k) => k !== "agent-pending" && k !== "comment-anchor"),
 );
@@ -74,6 +74,13 @@ const KNOWN_BLOCK_KINDS: ReadonlySet<string> = new Set(BlockKindSchema.literals)
 /** Nesting cap for pasted fragments — a crafted payload with deeper nesting
  *  is rejected up front (stack-overflow guard; see validateClipboardBlocks). */
 const MAX_PASTE_DEPTH = 32;
+
+/** Mark keys removable by the user-facing clear-formatting command.
+ *  `comment-anchor` is structural, not formatting (block-model.md §3 — "not
+ *  exposed to formatting UI"): stripping bold/italic must not orphan a
+ *  comment thread. Lexical's clear-formatting likewise leaves `MarkNode`
+ *  annotations in place. */
+const FORMAT_MARK_KEYS = MARK_KEYS.filter((k) => k !== "comment-anchor");
 
 /** Marks whose Loro text-style `expand` is "after" — inserting at the trailing
  *  edge of these marks causes the new text to inherit the mark. Used by
@@ -393,6 +400,17 @@ const applyDeltaMarks = (
     }
     cursor += len;
   }
+};
+
+/**
+ * Structural equality for mark values (booleans, strings, small plain
+ * objects like `{ threadId }` / `{ href }`). JSON comparison is sufficient:
+ * values are produced by our own commands, so key order is stable.
+ */
+const sameMarkValue = (a: unknown, b: unknown): boolean => {
+  if (a === b) return true;
+  if (typeof a !== "object" || typeof b !== "object" || !a || !b) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
 };
 
 /** Whether `mark` is present anywhere within `[start, end)` of `delta`. */
@@ -960,7 +978,9 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
           const text = ensureText(node);
           const delta = text.toDelta() as DeltaRun[];
           let coverage = 0;
+          let coverageSameValue = 0;
           let cursor = 0;
+          const requested = value ?? true;
           for (const part of delta) {
             if (typeof part.insert !== "string") continue;
             const partStart = cursor;
@@ -968,15 +988,23 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
             const overlapStart = Math.max(partStart, range.start);
             const overlapEnd = Math.min(partEnd, range.end);
             if (overlapEnd > overlapStart) {
-              const isOn =
-                !!part.attributes && part.attributes[mark] !== undefined;
-              if (isOn) coverage += overlapEnd - overlapStart;
+              const existing = part.attributes?.[mark];
+              if (existing !== undefined) {
+                const len = overlapEnd - overlapStart;
+                coverage += len;
+                if (sameMarkValue(existing, requested)) coverageSameValue += len;
+              }
             }
             cursor = partEnd;
           }
           const rangeLen = range.end - range.start;
           const fullyOn = rangeLen > 0 && coverage >= rangeLen;
-          if (fullyOn) {
+          // Fully-covered range: calling with NO value (the plain toggle
+          // gesture) or with the SAME value toggles the mark off. Calling
+          // with a DIFFERENT value (new comment threadId, new highlight
+          // color, new link href) is a REPLACE — the mark() below overwrites
+          // it — never a silent removal.
+          if (fullyOn && (value === undefined || coverageSameValue >= rangeLen)) {
             text.unmark(range, mark);
             return;
           }
@@ -1006,7 +1034,7 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
           if (!node) return;
           if (range.end <= range.start) return;
           const text = ensureText(node);
-          for (const key of MARK_KEYS) text.unmark(range, key);
+          for (const key of FORMAT_MARK_KEYS) text.unmark(range, key);
         }),
 
       insertMention: ({ blockId, range, principal }) => {
