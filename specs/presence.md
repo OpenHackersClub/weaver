@@ -82,7 +82,7 @@ initSync(editor.doc, { docId, wsUrl, presence: hub });
 
 // @weaver/react — embedding-app ergonomics
 const { peers } = usePresence(hub, { self: principal }); // publishes self + heartbeat
-<PresenceFacepile hub={hub} selfPeerId={…} />            // avatars, initials, +N overflow
+<PresenceFacepile hub={hub} maxFaces={5} className="…" /> // avatars, initials, +N overflow
 ```
 
 `usePresence` builds the local `PresenceRecord` from the app-supplied `Principal` — the only point where identity crosses into the mechanism. Caret rendering reuses the existing `attachPresenceOverlay` (`packages/dom/src/presence-overlay.ts`) unchanged: any record carrying a non-null `cursor` draws a caret, whether it came from a mock agent in-tab or a human over the wire.
@@ -92,6 +92,8 @@ const { peers } = usePresence(hub, { self: principal }); // publishes self + hea
 - **Tier / viewer-scope filtering** ([`prd.md`](prd.md) Phase 2b): the relay broadcasts presence room-wide. The frame tag keeps presence separable so the Biscuit-gated DO can later filter per-recipient without a wire change.
 - **Cursor publishing for humans**: the record schema carries `cursor`, and remote carets render today, but the v1 client publishes avatar-level presence (`cursor: null`); mapping the local DOM selection into block/offset on `selectionchange` is follow-up work shared with Loro `Cursor` anchoring ([`hard-problems.md`](hard-problems.md) §1).
 - **Presence authentication**: a malicious *authorized* peer can publish any label/avatar. Attribution, not verification (ADR 0005); the agent-threat-surface analysis applies unchanged.
+- **Relay-side resource caps**: the relay applies inbound presence frames into its replica without bounding the number of presence keys or the frame size per connection. Today this is only loosely bounded by the 45 s eviction timeout; a Phase 2b hardening pass should cap key count and frame size per connection so one peer can't bloat a room's replica.
+- **Playground `?ws=` origin allowlist**: the Playground accepts an arbitrary relay origin from the `?ws=` query param — fine for a local demo, but an allowlist (or explicit user confirmation before connecting to a foreign origin) belongs with the Phase 2b auth gate.
 
 ## Verification
 

@@ -184,18 +184,21 @@ describe("@weaver/core / presence — wire round-trip (specs/presence.md)", () =
   });
 
   it("a record outlives a short timeout only while refreshed (heartbeat)", async () => {
-    const hub = createPresenceHub({ timeoutMs: 150 });
+    // Margins are multiples of the timeout period to stay CI-stable: refresh
+    // well within the 600 ms window, then wait > 2× the window before
+    // asserting eviction. Total ~1.9 s, under the ~2.5 s budget.
+    const hub = createPresenceHub({ timeoutMs: 600 });
     hub.set(agentRecord("agent-1"));
 
     // Refresh (heartbeat) twice across the window — record survives.
     for (let i = 0; i < 2; i++) {
-      await new Promise((r) => setTimeout(r, 90));
+      await new Promise((r) => setTimeout(r, 200));
       hub.set(agentRecord("agent-1"));
     }
     expect(hub.all()).toHaveLength(1);
 
     // Stop heartbeating — record is evicted after the timeout.
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 1500));
     expect(hub.all()).toHaveLength(0);
 
     hub.dispose();
