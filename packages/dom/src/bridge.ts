@@ -1,5 +1,11 @@
 import type { BlockId, Editor } from "@weaver/core";
-import { blockElementContaining, blockIdOf, reconcileTopLevel } from "./dom-mapper.js";
+import {
+  TEXT_PLACEHOLDER,
+  blockElementContaining,
+  blockIdOf,
+  findBlockElement,
+  reconcileTopLevel,
+} from "./dom-mapper.js";
 import {
   type DomCaret,
   type DomRange,
@@ -157,6 +163,19 @@ export const attachEditor = (
   // (macOS autocorrect, IME, scripted bursts) all read the same stale DOM
   // selection at offset 0 and the chars come out reversed ("hello" → "olleh").
   // Idempotent and re-entrancy guarded so doc.subscribe can call it safely too.
+  // Whether a block's pre-reconcile DOM text matches the (already-committed)
+  // model text. Guards the selection restore below: a DOM-captured offset is
+  // only meaningful against unchanged text — re-applying it after a remote
+  // insert/delete in the same block would relocate the caret relative to
+  // what the user sees, which is worse than dropping it. Real cross-edit
+  // stability needs Loro Cursor anchors (specs/hard-problems.md §1).
+  const blockTextUnchanged = (blockId: BlockId): boolean => {
+    const el = findBlockElement(host, blockId);
+    if (!el) return false;
+    const domText = (el.textContent ?? "").replaceAll(TEXT_PLACEHOLDER, "");
+    return domText === editor.commands.text.read(blockId);
+  };
+
   const flushRerender = (): void => {
     if (flushing) return;
     flushing = true;
@@ -166,8 +185,20 @@ export const attachEditor = (
       // capture the live selection as model offsets before reconciling, then
       // write it back. Reconcile replaces marked runs via `replaceChildren`,
       // which would otherwise silently drop the user's caret whenever their
-      // block carries marks.
-      const restore = pendingCaret ?? readDomSelection(host);
+      // block carries marks. Restore only when the endpoint blocks' text is
+      // unchanged (see blockTextUnchanged).
+      let restore = pendingCaret;
+      if (!restore) {
+        const captured = readDomSelection(host);
+        if (
+          captured &&
+          blockTextUnchanged(captured.anchor.blockId) &&
+          (captured.anchor.blockId === captured.focus.blockId ||
+            blockTextUnchanged(captured.focus.blockId))
+        ) {
+          restore = captured;
+        }
+      }
       reconcileTopLevel(editor, host);
       if (restore) writeDomSelection(host, restore);
       pendingCaret = null;
@@ -402,6 +433,9 @@ export const attachEditor = (
       if (ev.shiftKey) editor.commands.history.redo();
       else editor.commands.history.undo();
       flushRerender();
+      // Undo can restore (or remove) trigger text — re-evaluate, symmetric
+      // with the Safari historyUndo beforeinput path.
+      notifyMentionTrigger();
       return;
     }
 
@@ -513,6 +547,13 @@ export const attachEditor = (
   // mention trigger on pure caret motion.
   if (options.onMentionTrigger) {
     host.ownerDocument.addEventListener("selectionchange", onSelectionChange);
+    // Scroll (capture: catches nested scrollers) and resize move the trigger's
+    // viewport rect without any selection change — re-anchor the picker.
+    host.ownerDocument.addEventListener("scroll", onSelectionChange, true);
+    host.ownerDocument.defaultView?.addEventListener(
+      "resize",
+      onSelectionChange,
+    );
   }
 
   return {
@@ -528,6 +569,15 @@ export const attachEditor = (
       if (options.onMentionTrigger) {
         host.ownerDocument.removeEventListener(
           "selectionchange",
+          onSelectionChange,
+        );
+        host.ownerDocument.removeEventListener(
+          "scroll",
+          onSelectionChange,
+          true,
+        );
+        host.ownerDocument.defaultView?.removeEventListener(
+          "resize",
           onSelectionChange,
         );
       }

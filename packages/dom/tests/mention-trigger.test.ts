@@ -117,10 +117,28 @@ describe("@weaver/dom / bridge onMentionTrigger", () => {
     expect(triggers[triggers.length - 1]).toBeNull();
   });
 
-  it("never fires while no @ is involved", () => {
+  it("never fires while no @ is involved — not even repeated nulls", () => {
     const { fx, triggers } = setupWithTriggers();
     fx.type("plain text only");
+    // Dedupe means zero notifications, not a stream of nulls.
+    expect(triggers).toEqual([]);
+  });
+
+  it("an emoji before the @ does not satisfy the whitespace rule (documented)", () => {
+    const { fx, triggers } = setupWithTriggers();
+    fx.type("🙂@ada");
     expect(triggers.every((t) => t === null)).toBe(true);
+  });
+
+  it("trigger offsets are UTF-16 — an emoji earlier in the block shifts them correctly", () => {
+    const { fx, triggers } = setupWithTriggers();
+    fx.type("🙂 @ad");
+    // "🙂 " is 3 UTF-16 code units; the @ sits at offset 3.
+    expect(triggers[triggers.length - 1]).toMatchObject({
+      start: 3,
+      end: 6,
+      query: "ad",
+    });
   });
 
   it("insertMention through the editor clears the trigger on the next input", () => {

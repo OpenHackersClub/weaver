@@ -63,6 +63,14 @@ export const detectMentionTrigger = (
   return { blockId: caret.blockId, start: at, end: offset, query };
 };
 
+const rectsEqual = (
+  a: MentionTrigger["rect"],
+  b: MentionTrigger["rect"],
+): boolean => {
+  if (a === null || b === null) return a === b;
+  return a.left === b.left && a.top === b.top && a.bottom === b.bottom;
+};
+
 export const mentionTriggersEqual = (
   a: MentionTrigger | null,
   b: MentionTrigger | null,
@@ -72,6 +80,9 @@ export const mentionTriggersEqual = (
     a.blockId === b.blockId &&
     a.start === b.start &&
     a.end === b.end &&
-    a.query === b.query
+    a.query === b.query &&
+    // The rect participates in equality so scroll / layout reflow (which
+    // changes only the anchor position) still reaches the picker.
+    rectsEqual(a.rect, b.rect)
   );
 };

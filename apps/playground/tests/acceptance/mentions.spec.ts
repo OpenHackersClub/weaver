@@ -110,12 +110,14 @@ test.describe("@-mention typeahead", () => {
 
     // Two mentions inserted programmatically within the 500ms window. The
     // playground's listener subscribes with debounceMs: 500 and mirrors each
-    // delivered batch to window.__weaver_mention_batches.
-    await page.evaluate(() => {
+    // delivered batch to window.__weaver_mention_batches. The "nothing
+    // delivered yet" check happens inside the SAME evaluate (one JS task) —
+    // a separate CDP roundtrip could lose a race against the timer on a
+    // loaded CI runner.
+    const batchesAtInsert = await page.evaluate(() => {
       const dbg = (
         window as unknown as {
           __weaver_debug: { tree: () => Array<{ id: string }> };
-          __weaver_editor?: unknown;
         }
       ).__weaver_debug;
       const blockId = dbg.tree()[0]!.id;
@@ -126,21 +128,24 @@ test.describe("@-mention typeahead", () => {
           id: string,
           label: string,
         ) => void;
+        __weaver_mention_batches?: unknown[];
       };
       if (!w.__weaver_mention_insert) {
         throw new Error("debug insert hook missing");
       }
       w.__weaver_mention_insert(blockId, 0, "user:ada", "Ada Lovelace");
       w.__weaver_mention_insert(blockId, 0, "user:grace", "Grace Hopper");
+      // Delivery requires the debounce timer to fire; synchronously after
+      // the inserts the mirror must still be empty.
+      return (w.__weaver_mention_batches ?? []).length;
     });
-
-    // Inside the debounce window nothing has been delivered yet.
-    expect(await mentionBatches(page)).toHaveLength(0);
+    expect(batchesAtInsert).toBe(0);
 
     await expect
       .poll(async () => (await mentionBatches(page)).length, { timeout: 3000 })
       .toBe(1);
     const batches = await mentionBatches(page);
+    expect(batches).toHaveLength(1);
     expect(batches[0]!.map((e) => e.principalId)).toEqual([
       "user:ada",
       "user:grace",

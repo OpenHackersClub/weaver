@@ -46,7 +46,7 @@ The hard rule: **anything that could be persisted, synced, or audited belongs in
 Every block has:
 
 - **A stable ID** — the underlying `LoroTreeNode` ID. Persists across moves, edits, and re-parenting. This is the only ID that ever appears in URLs, comments, audit logs, or capability tokens.
-- **A typed `kind`** — `paragraph`, `heading`, `list-item`, `code`, `quote`, `callout`, `divider`, `image`, `embed`, `mention`, plus plugin-registered kinds.
+- **A typed `kind`** — `paragraph`, `heading`, `list-item`, `code`, `quote`, `callout`, `divider`, `image`, `embed`, plus plugin-registered kinds. (Mentions are an inline *mark*, not a block kind — see [`mentions.md`](mentions.md).)
 - **Typed attributes** validated by Effect Schema (per-kind shape). Schema is registered with the block-kind plugin; the editor refuses to apply ops that violate it on the client.
 - **An optional inline content container** — `LoroText` for text-bearing kinds; absent for atomic blocks like `divider` or `image`.
 - **Children** — recursive, via `LoroTree` parent/child edges. Lists, toggles, callouts, table rows all nest this way.
@@ -121,7 +121,6 @@ Every command runs inside a single Loro transaction with `origin` set to the cal
 | `code` | No | Yes (plain) | `language: string`; tree-sitter highlighting. |
 | `image` | No | No | `src`, `alt`, `width`, `height`; OPFS cache + R2. |
 | `embed` | No | No | `url`, with allowlisted providers; iframe sandbox. |
-| `mention` | No | n/a (inline) | Inline kind; references a subject (user/agent). |
 | `divider` | No | No | Atomic. |
 | `table` | Yes (`table-row` → `table-cell`) | No (cells have inline) | Block-table (not a Database); fixed columns. |
 
@@ -137,6 +136,7 @@ Plugins can register additional block kinds. They cannot remove these built-ins 
 | `highlight` | `color: enum`. |
 | `comment-anchor` | Internal; anchors a comment thread; not exposed to formatting UI. |
 | `agent-pending` | Internal; "uncommitted agent edit" visualization. |
+| `mention` | `{ userId, label, kind? }` referencing a principal (user/agent); `expand: "none"` — atomic, typing at either edge never extends it; applying it emits `MentionCreated`. Full UX + event contract in [`mentions.md`](mentions.md). |
 
 Plugins can register additional marks with constraint declarations enforced at op-validation time.
 

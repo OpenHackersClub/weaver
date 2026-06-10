@@ -56,7 +56,15 @@ editor.events.on(
 - `MentionCreatedEvent` carries `blockId`, the marked `range`, the `principal`, and the `origin` of the editor that created it (`"user"`, `"agent-1"`, …).
 - **Debounce is trailing and lossless**: events inside the window are buffered and delivered as one batch after `debounceMs` of quiet. No event is dropped — a burst of N mentions is one callback with N events. `debounceMs: 0`/omitted delivers synchronously, one event per batch.
 - Programmatic mention application (`toggleMark` / `mark.update` with `mark: "mention"` — e.g. an agent tagging someone) emits the same event; toggling a mention **off** does not.
+- Listeners are isolated: a throwing subscriber is logged and skipped — it can neither starve other subscribers nor propagate into the editor command that emitted.
 - Scope note: the hub observes this editor's *commands*, not the CRDT — a mention merged in from a remote peer's sync update does not (yet) emit locally. Cross-peer mention notification belongs to the sync/notification layer and is future work.
+
+## Known v1 limitations
+
+- **Concurrent-edit guard, not transform.** `useMentions.insert()` revalidates that the text behind the trigger still equals `@query` before mutating; if a peer's edit shifted it, the picker closes instead of replacing the wrong range. Proper position stability across concurrent edits needs Loro `Cursor` anchors ([`hard-problems.md`](hard-problems.md) §1).
+- **Trigger requires block start or whitespace before the `@`** — an emoji or punctuation immediately before it does not trigger (Notion is more permissive here). Full-width `＠` (U+FF20, JP input) is not a trigger character.
+- **No live filtering during IME composition.** Trigger evaluation is suppressed while composing and re-runs on commit; the menu also ignores keys while a composition is active (`isComposing`).
+- **Selection restore across reconciles is text-equality gated.** The bridge restores the caret over a re-rendered marked block only when that block's text is unchanged in the commit; offset transformation across remote text edits is the same Loro `Cursor` future work.
 
 ## Rendering
 

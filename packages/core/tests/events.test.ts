@@ -101,6 +101,58 @@ describe("@weaver/core / events / hub", () => {
     expect(seen).toHaveLength(0);
   });
 
+  it("a throwing listener neither starves later subscribers nor loses its own later batches", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const hub = createEditorEventHub();
+      const seen: MentionCreatedEvent[] = [];
+      hub.on("MentionCreated", () => {
+        throw new Error("listener bug");
+      });
+      hub.on("MentionCreated", (events) => seen.push(...events));
+      expect(() => hub.emit(mentionEvent())).not.toThrow();
+      expect(seen).toHaveLength(1);
+      expect(errSpy).toHaveBeenCalled();
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it("a throwing debounced listener does not crash the flush timer or later windows", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const hub = createEditorEventHub();
+      let calls = 0;
+      hub.on(
+        "MentionCreated",
+        () => {
+          calls += 1;
+          if (calls === 1) throw new Error("listener bug");
+        },
+        { debounceMs: 50 },
+      );
+      hub.emit(mentionEvent());
+      expect(() => vi.advanceTimersByTime(50)).not.toThrow();
+      hub.emit(mentionEvent());
+      vi.advanceTimersByTime(50);
+      expect(calls).toBe(2);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it("a listener subscribing during delivery does not receive the in-flight event", () => {
+    const hub = createEditorEventHub();
+    const late: MentionCreatedEvent[] = [];
+    hub.on("MentionCreated", () => {
+      hub.on("MentionCreated", (events) => late.push(...events));
+    });
+    hub.emit(mentionEvent());
+    expect(late).toHaveLength(0);
+    hub.emit(mentionEvent());
+    expect(late).toHaveLength(1);
+  });
+
   it("independent subscribers get independent debounce windows", () => {
     const hub = createEditorEventHub();
     const fast: ReadonlyArray<MentionCreatedEvent>[] = [];
@@ -161,6 +213,41 @@ describe("@weaver/core / events / editor integration", () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]!.origin).toBe("agent-1");
     expect(seen[0]!.principal.kind).toBe("user");
+  });
+
+  it("mark.update on a missing block writes nothing and emits nothing", () => {
+    const editor = createEditor();
+    const seen: MentionCreatedEvent[] = [];
+    editor.events.on("MentionCreated", (events) => seen.push(...events));
+    editor.commands.text.mark.update({
+      blockId: "999@99999",
+      range: { start: 0, end: 4 },
+      mark: "mention",
+      value: { userId: "user:ada", label: "@ada" },
+    });
+    expect(seen).toHaveLength(0);
+  });
+
+  it("a listener throwing does not escape the emitting command", () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const editor = createEditor();
+      const id = getChildren(editor, rootId(editor))[0]!;
+      editor.events.on("MentionCreated", () => {
+        throw new Error("listener bug");
+      });
+      expect(() =>
+        editor.commands.text.insertMention({
+          blockId: id,
+          range: { start: 0, end: 0 },
+          principal: { id: "user:ada", label: "Ada" },
+        }),
+      ).not.toThrow();
+      // The mutation itself committed despite the listener bug.
+      expect(editor.commands.text.read(id)).toBe("@Ada ");
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 
   it("non-mention marks never emit MentionCreated", () => {

@@ -115,6 +115,52 @@ describe("@weaver/core / text.insertMention", () => {
     expect(tail.attributes?.["mention"]).toBeUndefined();
   });
 
+  it("redo after undo restores both the text and the mention mark, without re-emitting", () => {
+    const { editor, id } = setup();
+    const seen: MentionCreatedEvent[] = [];
+    editor.events.on("MentionCreated", (events) => seen.push(...events));
+    editor.commands.history.flushMergeWindow();
+    editor.commands.text.insertMention({
+      blockId: id,
+      range: { start: 10, end: 13 },
+      principal: { id: "user:ada", label: "Ada" },
+    });
+    expect(editor.commands.history.undo()).toBe(true);
+    expect(editor.commands.history.redo()).toBe(true);
+    expect(editor.commands.text.toDelta(id)).toEqual([
+      { insert: "say hi to " },
+      {
+        insert: "@Ada",
+        attributes: { mention: { userId: "user:ada", label: "@Ada" } },
+      },
+      { insert: " " },
+    ]);
+    // Events fire at command time only — undo/redo replay ops, not commands.
+    expect(seen).toHaveLength(1);
+  });
+
+  it("a mention inside a styled run inherits the surrounding mark (Notion-like)", () => {
+    // Pinned: the label inherits expand:"after" marks spanning the trigger.
+    const { editor, id } = setup();
+    editor.commands.text.toggleMark({
+      blockId: id,
+      range: { start: 0, end: 13 },
+      mark: "bold",
+    });
+    editor.commands.text.insertMention({
+      blockId: id,
+      range: { start: 10, end: 13 },
+      principal: { id: "user:ada", label: "Ada" },
+    });
+    const delta = editor.commands.text.toDelta(id) as ReadonlyArray<{
+      insert?: string;
+      attributes?: Record<string, unknown>;
+    }>;
+    const chip = delta.find((r) => r.attributes?.["mention"]);
+    expect(chip?.insert).toBe("@Ada");
+    expect(chip?.attributes?.["bold"]).toBe(true);
+  });
+
   it("clamps an out-of-bounds range to the text length", () => {
     const { editor, id } = setup("hi");
     editor.commands.text.insertMention({

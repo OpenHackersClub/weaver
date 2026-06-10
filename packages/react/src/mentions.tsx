@@ -65,6 +65,19 @@ export const useMentions = (
     (principal: Principal): void => {
       const active = Effect.runSync(Ref.get(trigger));
       if (!active) return;
+      // Revalidate before mutating: a remote peer's edit between trigger
+      // capture and this click/Enter can shift or delete the trigger range —
+      // captured offsets would then replace the wrong characters (or land
+      // mid-codepoint and throw from Loro). Loro `Cursor` anchoring is the
+      // long-term fix (specs/hard-problems.md); until then, bail and close
+      // when the text behind the trigger no longer matches.
+      const current = editor.commands.text
+        .read(active.blockId)
+        .slice(active.start, active.end);
+      if (current !== `@${active.query}`) {
+        close();
+        return;
+      }
       const marked = editor.commands.text.insertMention({
         blockId: active.blockId,
         range: { start: active.start, end: active.end },
@@ -159,6 +172,10 @@ export const MentionMenu = ({
   useEffect(() => {
     if (!trigger) return;
     const onKeyDown = (ev: KeyboardEvent): void => {
+      // Never steal keys from an active IME composition — Enter commits the
+      // candidate, Escape cancels it, arrows navigate the candidate window.
+      // (229 is the legacy "composition in progress" keyCode.)
+      if (ev.isComposing || ev.keyCode === 229) return;
       if (ev.key === "ArrowDown") {
         ev.preventDefault();
         ev.stopPropagation();
@@ -171,11 +188,17 @@ export const MentionMenu = ({
         setSelected((s) => Math.max(s - 1, 0));
         return;
       }
-      if ((ev.key === "Enter" || ev.key === "Tab") && matches.length > 0) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const choice = matches[selected] ?? matches[0]!;
-        mentions.insert(choice);
+      if (ev.key === "Enter" || ev.key === "Tab") {
+        if (matches.length > 0) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const choice = matches[selected] ?? matches[0]!;
+          mentions.insert(choice);
+        } else {
+          // "No matches": dismiss and let the key act on the editor —
+          // otherwise Enter/Tab would visibly act "behind" an open menu.
+          mentions.close();
+        }
         return;
       }
       if (ev.key === "Escape") {

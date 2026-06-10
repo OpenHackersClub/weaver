@@ -71,20 +71,39 @@ interface Subscription {
 export const createEditorEventHub = (): EditorEventHub => {
   const subs = new Map<EditorEventTag, Set<Subscription>>();
 
+  // Listener isolation: events are emitted from inside editor command bodies
+  // (post-commit) and from timers. A throwing subscriber must neither starve
+  // later subscribers nor propagate into the command / React handler that
+  // triggered the emit — the doc mutation has already committed.
+  const deliver = (
+    sub: Subscription,
+    batch: ReadonlyArray<EditorEvent>,
+  ): void => {
+    try {
+      sub.listener(batch);
+    } catch (err) {
+      console.error("editor event listener threw", err);
+    }
+  };
+
   const flush = (sub: Subscription): void => {
     sub.timer = null;
     const batch = sub.buffer;
     sub.buffer = [];
-    if (batch.length > 0) sub.listener(batch);
+    if (batch.length > 0) deliver(sub, batch);
   };
 
   return {
     emit: (event) => {
       const set = subs.get(tagOf(event));
       if (!set) return;
-      for (const sub of set) {
+      // Snapshot: a synchronous listener may subscribe/unsubscribe during
+      // delivery; new subscribers must not receive an event from before
+      // their subscription.
+      for (const sub of [...set]) {
+        if (!set.has(sub)) continue; // unsubscribed by an earlier listener
         if (sub.debounceMs <= 0) {
-          sub.listener([event]);
+          deliver(sub, [event]);
           continue;
         }
         sub.buffer.push(event);

@@ -886,6 +886,7 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
 
       mark: {
         update: ({ blockId, range, mark, value }) => {
+          let applied = false;
           withOrigin(() => {
             const node = getNode(tree, blockId);
             if (!node) return;
@@ -893,8 +894,11 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
             validateMarkValue(mark, value);
             const text = ensureText(node);
             text.mark(range, mark, value ?? true);
+            applied = true;
           });
-          emitIfMentionApplied(blockId, range, mark, value);
+          // Guarded so a write that didn't happen (block deleted by a peer,
+          // empty range) can't emit a phantom MentionCreated.
+          if (applied) emitIfMentionApplied(blockId, range, mark, value);
         },
       },
     },
