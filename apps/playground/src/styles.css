@@ -209,6 +209,68 @@ h6.weaver-heading {
   font-style: italic;
 }
 
+.weaver-bullet-list-item,
+.weaver-numbered-list-item {
+  margin-left: 1.2em;
+}
+
+li.weaver-bullet-list-item {
+  list-style: disc;
+}
+
+li.weaver-numbered-list-item {
+  list-style: decimal;
+}
+
+li.weaver-to-do {
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+[data-todo-check] {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border: 1.5px solid var(--muted);
+  border-radius: 3px;
+  cursor: pointer;
+  align-self: center;
+}
+
+[data-todo-check].weaver-todo-checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+li.weaver-to-do .weaver-todo-content {
+  flex: 1;
+}
+
+[data-todo-check].weaver-todo-checked + .weaver-todo-content {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+pre.weaver-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+  font-size: 13px;
+  background: var(--code);
+  color: var(--code-fg);
+  padding: 10px 12px;
+  border-radius: 6px;
+  tab-size: 4;
+}
+
+hr.weaver-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 14px 0;
+}
+
 .weaver-host strong,
 .weaver-host b {
   font-weight: 700;

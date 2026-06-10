@@ -3,11 +3,10 @@ import { createEditor, getChildren, rootId } from "../src/index.js";
 import { future, type FutureSelectionRange } from "./_test-helpers.js";
 
 /**
- * Selection tests — TDD red.
+ * Selection tests.
  *
  * specs/lexical-parity.md §3 commits to `selection.*` commands and §5 to
- * `useSelection()`. Today the editor has no selection surface — these tests
- * pin the contract.
+ * `useSelection()`. These tests pin that contract for `commands.selection`.
  */
 
 const setup = () => {

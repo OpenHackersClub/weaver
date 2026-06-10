@@ -52,8 +52,7 @@ describe("@weaver/dom / Enter splits the current block", () => {
     expect(f.blockTexts()).toEqual(["a", "b", ""]);
   });
 
-  it("Shift+Enter is a *soft* line break — stays in one block (TDD red)", () => {
-    // Bridge currently treats `insertLineBreak` as a hard block split.
+  it("Shift+Enter is a *soft* line break — stays in one block", () => {
     // specs/lexical-parity.md §1 LineBreakNode → "inline ` ` or `<br>` analog
     // inside `LoroText`". The firm contract pinned here is *no new block*;
     // whether the break is encoded as a character or an inline node is the
@@ -333,7 +332,7 @@ describe("@weaver/dom / formatting via Ctrl+B / Ctrl+I / Ctrl+U", () => {
   });
 });
 
-describe("@weaver/dom / undo & redo via keyboard — TDD red", () => {
+describe("@weaver/dom / undo & redo via keyboard", () => {
   it("Ctrl+Z undoes the last typing batch", () => {
     f.type("hello");
     f.key("z", { ctrlKey: true });
@@ -352,7 +351,7 @@ describe("@weaver/dom / undo & redo via keyboard — TDD red", () => {
   });
 });
 
-describe("@weaver/dom / Ctrl+A select-all — TDD red", () => {
+describe("@weaver/dom / Ctrl+A select-all", () => {
   it("Ctrl+A selects from the start of the first block to the end of the last", () => {
     f.type("first");
     f.press("insertParagraph");
@@ -368,13 +367,16 @@ describe("@weaver/dom / Ctrl+A select-all — TDD red", () => {
   });
 });
 
-describe("@weaver/dom / Tab / Shift-Tab indent / outdent — TDD red", () => {
-  it("Tab on a bullet-list-item indents it under the previous sibling", () => {
-    // Seed two list items via markdown shortcut.
+describe("@weaver/dom / Tab / Shift-Tab indent / outdent", () => {
+  // Nested blocks render as flat DOM siblings in document order, indented
+  // via `data-depth` — they must never disappear from the DOM (regression:
+  // the pre-`documentOrderWithDepth` reconciler only rendered root children,
+  // so indenting a block removed its element entirely).
+  it("Tab on a bullet-list-item nests it in the tree and keeps it rendered", () => {
+    // Seed two list items: `- ` shortcut, then Enter continues the list.
     f.type("- ");
     f.type("alpha");
     f.press("insertParagraph");
-    f.type("- ");
     f.type("beta");
 
     expect(f.blockKinds()).toEqual([
@@ -383,19 +385,20 @@ describe("@weaver/dom / Tab / Shift-Tab indent / outdent — TDD red", () => {
     ]);
     f.key("Tab");
 
-    // After indent, the second item should be nested inside the first;
-    // top-level should have only the first.
-    const topLevel = Array.from(f.host.children).filter((c) =>
-      c.hasAttribute("data-block-id"),
-    );
-    expect(topLevel).toHaveLength(1);
+    // Both blocks stay in the DOM; the indented one carries data-depth=1.
+    expect(f.blockTexts()).toEqual(["alpha", "beta"]);
+    const depths = f.blockEls().map((el) => el.getAttribute("data-depth"));
+    expect(depths).toEqual(["0", "1"]);
+    // And the LoroDoc tree really nests beta under alpha.
+    const [alphaId] = f.blockEls().map((el) => el.getAttribute("data-block-id"));
+    const { getChildren } = f;
+    expect(getChildren(alphaId!)).toHaveLength(1);
   });
 
-  it("Shift+Tab on a nested item outdents it back to the top level", () => {
+  it("Shift+Tab on a nested item outdents it back to depth 0", () => {
     f.type("- ");
     f.type("alpha");
     f.press("insertParagraph");
-    f.type("- ");
     f.type("beta");
     // Precondition: the `- ` shortcut must have produced real list items.
     // Without this assertion the test passes vacuously (paragraphs stay
@@ -407,10 +410,10 @@ describe("@weaver/dom / Tab / Shift-Tab indent / outdent — TDD red", () => {
     f.key("Tab");
     f.key("Tab", { shiftKey: true });
 
-    const topLevel = Array.from(f.host.children).filter((c) =>
-      c.hasAttribute("data-block-id"),
-    );
-    expect(topLevel).toHaveLength(2);
+    const depths = f.blockEls().map((el) => el.getAttribute("data-depth"));
+    expect(depths).toEqual(["0", "0"]);
+    const [alphaId] = f.blockEls().map((el) => el.getAttribute("data-block-id"));
+    expect(f.getChildren(alphaId!)).toHaveLength(0);
   });
 });
 

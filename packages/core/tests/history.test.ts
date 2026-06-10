@@ -3,11 +3,11 @@ import { createEditor, getBlock, getChildren, rootId } from "../src/index.js";
 import { future } from "./_test-helpers.js";
 
 /**
- * History tests — TDD red.
+ * History tests.
  *
- * Loro ships an `UndoManager` (peer-scoped, mergeInterval-aware) but
- * `@weaver/core` does not yet expose it through the command bus. These tests
- * pin the contract from specs/lexical-parity.md §3 (UNDO_COMMAND, REDO_COMMAND,
+ * `@weaver/core` exposes Loro's `UndoManager` (peer-scoped,
+ * mergeInterval-aware) through `commands.history`. These tests pin the
+ * contract from specs/lexical-parity.md §3 (UNDO_COMMAND, REDO_COMMAND,
  * CLEAR_HISTORY_COMMAND, CAN_UNDO / CAN_REDO) and ADR 0001 (peer-scoped undo).
  */
 

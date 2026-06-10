@@ -1,6 +1,7 @@
 import type { BlockId, BlockKind, Editor } from "@weaver/core";
 import { getBlock, getChildren, rootId } from "@weaver/core";
 import { Match } from "effect";
+import { documentOrderWithDepth } from "./dom-mapper.js";
 import {
   type DomCaret,
   type DomRange,
@@ -13,18 +14,44 @@ export interface ApplyResult {
   readonly caret: IntendedCaret;
 }
 
-const previousSibling = (editor: Editor, id: BlockId): BlockId | null => {
-  const kids = getChildren(editor, rootId(editor));
-  const i = kids.indexOf(id);
-  if (i <= 0) return null;
-  return kids[i - 1] ?? null;
+/** Parent of `id` in the block tree — ROOT for top-level blocks, null if missing. */
+const findParent = (editor: Editor, id: BlockId): BlockId | null => {
+  const walk = (parentId: BlockId): BlockId | null => {
+    for (const child of getChildren(editor, parentId)) {
+      if (child === id) return parentId;
+      const found = walk(child);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(rootId(editor));
 };
 
-const nextSibling = (editor: Editor, id: BlockId): BlockId | null => {
-  const kids = getChildren(editor, rootId(editor));
-  const i = kids.indexOf(id);
-  if (i < 0 || i + 1 >= kids.length) return null;
-  return kids[i + 1] ?? null;
+// Backspace/Delete at a block edge operate on the *visually adjacent* line.
+// The DOM renders blocks flat in document order, so that neighbour is the
+// document-order predecessor/successor — which, with nesting, is not always
+// a sibling (e.g. the predecessor of a top-level block can be the deepest
+// descendant of the previous top-level block).
+const docOrderNeighbor = (
+  editor: Editor,
+  id: BlockId,
+  delta: -1 | 1,
+): BlockId | null => {
+  const order = documentOrderWithDepth(editor);
+  const i = order.findIndex((entry) => entry.id === id);
+  if (i < 0) return null;
+  return order[i + delta]?.id ?? null;
+};
+
+/** Insert a fresh paragraph right after `blockId` and return its id. */
+const insertParagraphAfter = (editor: Editor, blockId: BlockId): BlockId => {
+  const parent = findParent(editor, blockId) ?? rootId(editor);
+  const index = getChildren(editor, parent).indexOf(blockId) + 1;
+  return editor.commands.block.insert({
+    parentId: parent,
+    index,
+    kind: "paragraph",
+  });
 };
 
 export const handleInsertText = (
@@ -32,14 +59,23 @@ export const handleInsertText = (
   caret: DomCaret,
   value: string,
 ): ApplyResult => {
+  // Typing with the caret on a block that has no inline text (divider, image,
+  // embed) cannot insert there — `text.insert` would throw. Notion's behavior:
+  // the text starts a new paragraph below the block.
+  const target = getBlock(editor, caret.blockId);
+  if (target && !target.hasInline) {
+    const newId = insertParagraphAfter(editor, caret.blockId);
+    editor.commands.text.insert({ blockId: newId, offset: 0, value });
+    return { caret: { blockId: newId, offset: value.length } };
+  }
   editor.commands.text.insert({
     blockId: caret.blockId,
     offset: caret.offset,
     value,
   });
   const newCaret: DomCaret = { blockId: caret.blockId, offset: caret.offset + value.length };
-  maybeApplyMarkdownShortcut(editor, newCaret);
-  return { caret: latestCaret(editor, caret, newCaret) };
+  const shortcutCaret = maybeApplyMarkdownShortcut(editor, newCaret);
+  return { caret: shortcutCaret ?? latestCaret(editor, caret, newCaret) };
 };
 
 const latestCaret = (editor: Editor, prev: DomCaret, candidate: DomCaret): DomCaret => {
@@ -99,10 +135,19 @@ const applyInlineShortcut = (editor: Editor, caret: DomCaret): boolean => {
   return false;
 };
 
-const maybeApplyMarkdownShortcut = (editor: Editor, caret: DomCaret): void => {
+/**
+ * Apply a block-level or inline markdown shortcut if the block's text matches
+ * one. Returns a caret override when the transform moves the caret somewhere
+ * the plain insert-position arithmetic can't know about (currently only the
+ * divider, which has no inline text to put a caret in).
+ */
+const maybeApplyMarkdownShortcut = (
+  editor: Editor,
+  caret: DomCaret,
+): DomCaret | null => {
   const block = getBlock(editor, caret.blockId);
-  if (!block) return;
-  if (block.kind !== "paragraph") return;
+  if (!block) return null;
+  if (block.kind !== "paragraph") return null;
   const text = editor.commands.text.read(caret.blockId);
 
   const transformBlock = (
@@ -130,51 +175,55 @@ const maybeApplyMarkdownShortcut = (editor: Editor, caret: DomCaret): void => {
     const hashes = heading[1] ?? "";
     const level = Math.max(1, Math.min(6, hashes.length)) as 1 | 2 | 3 | 4 | 5 | 6;
     transformBlock(hashes.length + 1, "heading", { level });
-    return;
+    return null;
   }
 
-  // Divider — check before bullet (`*** ` must not be read as `* `).
+  // Divider — check before bullet (`*** ` must not be read as `* `). A
+  // divider has no inline text, so the caret can't stay in the transformed
+  // block: continue in a fresh paragraph below (Notion's behavior).
   if (text === "--- " || text === "*** ") {
     transformBlock(4, "divider");
-    return;
+    const newId = insertParagraphAfter(editor, caret.blockId);
+    return { blockId: newId, offset: 0 };
   }
 
   // Code fence — 3 backticks + space.
   if (text === "``` ") {
     transformBlock(4, "code");
-    return;
+    return null;
   }
 
   // Quote.
   if (text === "> ") {
     transformBlock(2, "quote");
-    return;
+    return null;
   }
 
   // Bullet list — `- ` or `* `.
   if (text === "- " || text === "* ") {
     transformBlock(2, "bullet-list-item");
-    return;
+    return null;
   }
 
   // Numbered list — `\d+. `.
   if (MARKDOWN_NUMBERED.test(text)) {
     transformBlock(text.length, "numbered-list-item");
-    return;
+    return null;
   }
 
   // To-do — `[ ] ` / `[x] ` / `[X] `.
   if (text === "[ ] ") {
     transformBlock(4, "to-do", { checked: false });
-    return;
+    return null;
   }
   if (text === "[x] " || text === "[X] ") {
     transformBlock(4, "to-do", { checked: true });
-    return;
+    return null;
   }
 
   // No block-level transform fired — try inline delimiter shortcuts.
   applyInlineShortcut(editor, caret);
+  return null;
 };
 
 export const handleInsertLineBreak = (
@@ -211,14 +260,39 @@ export const handleEnter = (editor: Editor, caret: DomCaret): ApplyResult => {
     });
     return { caret: { blockId: caret.blockId, offset: 0 } };
   }
+  // Captured before the split — afterwards the head block's length always
+  // equals `caret.offset`, so "was the caret at the end?" must be read first.
+  const atEnd = caret.offset >= editor.commands.text.length(caret.blockId);
   const newId = editor.commands.block.split({
     blockId: caret.blockId,
     offset: caret.offset,
   });
+  // Enter at the END of a heading or quote starts a plain paragraph — only a
+  // mid-block split carries the kind into the tail (Lexical's
+  // `insertNewAfter`; Notion behaves the same). List items keep continuing.
+  if (block && (block.kind === "heading" || block.kind === "quote") && atEnd) {
+    editor.commands.block.transform({
+      blockId: newId,
+      newKind: "paragraph",
+      attrs: {},
+    });
+  }
   return { caret: { blockId: newId, offset: 0 } };
 };
 
 export const handleBackspace = (editor: Editor, caret: DomCaret): ApplyResult | null => {
+  const block = getBlock(editor, caret.blockId);
+  // Caret sitting on a block with no inline text (divider, image, embed):
+  // Backspace removes the block itself — merging would throw.
+  if (block && !block.hasInline) {
+    const prev = docOrderNeighbor(editor, caret.blockId, -1);
+    editor.commands.block.delete({ blockId: caret.blockId });
+    if (prev) {
+      return { caret: { blockId: prev, offset: editor.commands.text.length(prev) } };
+    }
+    const first = getChildren(editor, rootId(editor))[0];
+    return first ? { caret: { blockId: first, offset: 0 } } : null;
+  }
   if (caret.offset > 0) {
     editor.commands.text.delete({
       blockId: caret.blockId,
@@ -227,12 +301,17 @@ export const handleBackspace = (editor: Editor, caret: DomCaret): ApplyResult | 
     });
     return { caret: { blockId: caret.blockId, offset: caret.offset - 1 } };
   }
-  // offset === 0
-  const prev = previousSibling(editor, caret.blockId);
+  // offset === 0 on a nested block — lift it one level before any merge
+  // (Notion: the first Backspace at the start of an indented block outdents).
+  const parent = findParent(editor, caret.blockId);
+  if (parent && parent !== rootId(editor)) {
+    editor.commands.block.outdent({ blockId: caret.blockId });
+    return { caret };
+  }
+  const prev = docOrderNeighbor(editor, caret.blockId, -1);
   if (!prev) {
-    // first block, offset 0 — if heading, demote to paragraph
-    const b = getBlock(editor, caret.blockId);
-    if (b && b.kind !== "paragraph") {
+    // first block, offset 0 — if heading/list/quote, demote to paragraph
+    if (block && block.kind !== "paragraph") {
       editor.commands.block.transform({
         blockId: caret.blockId,
         newKind: "paragraph",
@@ -241,6 +320,13 @@ export const handleBackspace = (editor: Editor, caret: DomCaret): ApplyResult | 
       return { caret };
     }
     return null;
+  }
+  const prevBlock = getBlock(editor, prev);
+  if (prevBlock && !prevBlock.hasInline) {
+    // The visually-previous line is a divider-like block — delete it rather
+    // than merging into something that can't hold text.
+    editor.commands.block.delete({ blockId: prev });
+    return { caret };
   }
   const prevLen = editor.commands.text.length(prev);
   editor.commands.block.merge({ prevId: prev, nextId: caret.blockId });
@@ -322,6 +408,15 @@ export const handleDeleteForward = (
   editor: Editor,
   caret: DomCaret,
 ): ApplyResult | null => {
+  const block = getBlock(editor, caret.blockId);
+  // Caret on a divider-like block: forward-delete removes the block itself.
+  if (block && !block.hasInline) {
+    const next = docOrderNeighbor(editor, caret.blockId, 1);
+    editor.commands.block.delete({ blockId: caret.blockId });
+    if (next) return { caret: { blockId: next, offset: 0 } };
+    const first = getChildren(editor, rootId(editor))[0];
+    return first ? { caret: { blockId: first, offset: 0 } } : null;
+  }
   const len = editor.commands.text.length(caret.blockId);
   if (caret.offset < len) {
     editor.commands.text.delete({
@@ -331,8 +426,14 @@ export const handleDeleteForward = (
     });
     return { caret };
   }
-  const next = nextSibling(editor, caret.blockId);
+  const next = docOrderNeighbor(editor, caret.blockId, 1);
   if (!next) return null;
+  const nextBlock = getBlock(editor, next);
+  if (nextBlock && !nextBlock.hasInline) {
+    // Forward-delete into a divider-like block removes it.
+    editor.commands.block.delete({ blockId: next });
+    return { caret };
+  }
   editor.commands.block.merge({ prevId: caret.blockId, nextId: next });
   return { caret };
 };

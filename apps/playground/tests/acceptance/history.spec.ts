@@ -1,11 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * Undo / redo acceptance tests — TDD red.
+ * Undo / redo acceptance tests.
  *
- * Loro ships an `UndoManager`; weaver has not yet wired `Ctrl+Z` /
- * `Ctrl+Shift+Z` into the DOM bridge. `specs/lexical-parity.md` §3 commits
- * to UNDO_COMMAND / REDO_COMMAND. These mirror Lexical's `History.spec.mjs`.
+ * `Ctrl+Z` / `Ctrl+Shift+Z` (and Safari's `historyUndo`/`historyRedo`
+ * beforeinput events) drive Loro's `UndoManager` via the DOM bridge —
+ * `specs/lexical-parity.md` §3 UNDO_COMMAND / REDO_COMMAND. These mirror
+ * Lexical's `History.spec.mjs`.
  */
 
 const EMPTY_DOC_URL = "/?example=empty";

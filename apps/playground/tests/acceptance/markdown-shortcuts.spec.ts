@@ -3,10 +3,10 @@ import { test, expect, type Page } from "@playwright/test";
 /**
  * Markdown-shortcut acceptance tests against the deployed playground.
  *
- * Lexical's `Markdown.spec.mjs` exercises the full shortcut set. weaver
- * currently ships only the `# `..`###### ` heading shortcut (see
- * `packages/dom/src/keymap.ts`). Everything else here is a TDD-red target
- * pinned from `specs/lexical-parity.md` §4 (MarkdownShortcutPlugin).
+ * Lexical's `Markdown.spec.mjs` exercises the full shortcut set; weaver's
+ * equivalents live in `packages/dom/src/keymap.ts`
+ * (`maybeApplyMarkdownShortcut`), pinned from `specs/lexical-parity.md` §4
+ * (MarkdownShortcutPlugin).
  */
 
 const EMPTY_DOC_URL = "/?example=empty";
@@ -86,22 +86,14 @@ test.describe("markdown shortcuts — block kinds", () => {
     expect(await blockKinds(page)).toEqual(["to-do"]);
   });
 
-  // `code` and `divider` are committed v1 block kinds in lexical-parity.md §1
-  // but are not yet in `BlockKindSchema` (packages/core/src/block.ts). These
-  // two need the schema extended before the shortcut can be wired — a larger
-  // change than the other shortcuts above.
-  test("'```' + space opens a code block (needs `code` in BlockKindSchema)", async ({
-    page,
-  }) => {
+  test("'```' + space opens a code block", async ({ page }) => {
     await page.goto(EMPTY_DOC_URL);
     await focusEditor(page);
     await page.keyboard.type("``` ");
     expect(await blockKinds(page)).toEqual(["code"]);
   });
 
-  test("'--- ' inserts a divider (needs `divider` in BlockKindSchema)", async ({
-    page,
-  }) => {
+  test("'--- ' inserts a divider", async ({ page }) => {
     await page.goto(EMPTY_DOC_URL);
     await focusEditor(page);
     await page.keyboard.type("--- ");

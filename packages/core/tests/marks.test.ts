@@ -152,10 +152,9 @@ describe("@weaver/core / marks — applied via toggleMark on a range", () => {
   });
 
   it("a zero-length range is a silent no-op and does not throw", () => {
-    // TDD red: core `toggleMark` forwards a zero-length range straight to
-    // Loro's `text.mark`, which rejects `start === end` ("Start must be less
-    // than end"). The contract should be a silent no-op — implementer must
-    // guard `rangeLen === 0` in `editor.ts`. This fails today on that throw.
+    // Contract: a zero-length range is a silent no-op — `editor.ts` guards
+    // `range.end <= range.start` before reaching Loro's `text.mark` (which
+    // would throw "Start must be less than end").
     const { editor, id } = seedBlockWithText("abc");
     expect(() =>
       editor.commands.text.toggleMark({
@@ -192,9 +191,8 @@ describe("@weaver/core / marks — typed payloads (link href, highlight color)",
 
   it("a link mark with an empty href is rejected (validation gate)", () => {
     const { editor, id } = seedBlockWithText("click");
-    // TDD red: validation should refuse an empty href — current impl accepts
-    // any value. The thrown error must name `href` so this can't pass on an
-    // unrelated throw.
+    // Validation refuses an empty href (`validateMarkValue`). The thrown
+    // error must name `href` so this can't pass on an unrelated throw.
     expect(() =>
       editor.commands.text.toggleMark({
         blockId: id,
@@ -228,7 +226,6 @@ describe("@weaver/core / marks — typed payloads (link href, highlight color)",
       mark: "link",
       value: { href: "https://old.example.com" },
     });
-    // TDD red: `text.mark.update` is not yet on the surface.
     future(editor).commands.text.mark.update({
       blockId: id,
       range: { start: 0, end: 4 },
@@ -253,8 +250,8 @@ describe("@weaver/core / marks — overlap & expand semantics", () => {
       mark: "link",
       value: { href: "https://example.com" },
     });
-    // Applying code over the same span should either throw or strip the link.
-    // TDD red: current impl applies both, which the parity spec forbids.
+    // Applying code over the same span strips the link — the parity spec
+    // forbids both coexisting (`toggleMark` unmarks the conflicting key).
     editor.commands.text.toggleMark({
       blockId: id,
       range: { start: 0, end: 5 },
@@ -319,8 +316,8 @@ describe("@weaver/core / marks — overlap & expand semantics", () => {
 
 describe("@weaver/core / marks — preservation across structural ops", () => {
   it("block.split preserves marks on both halves of the text", () => {
-    // Currently the split impl reads `text.toString()` and re-inserts the tail
-    // as a plain string — marks on the tail are dropped. TDD red.
+    // The split impl slices the source delta and re-applies the tail's marks
+    // onto the new block (`sliceDelta` + `applyDeltaMarks`).
     const { editor, id } = seedBlockWithText("hello");
     editor.commands.text.toggleMark({
       blockId: id,
@@ -338,8 +335,8 @@ describe("@weaver/core / marks — preservation across structural ops", () => {
   });
 
   it("block.merge keeps each half's mark coverage on its original characters", () => {
-    // TDD red: merging currently appends `next.toString()` as plain text, so
-    // marks on the next block are lost.
+    // Merge re-applies the next block's delta marks after concatenating its
+    // text, and suppresses `expand: "after"` bleed across the boundary.
     const { editor, id: firstId } = seedBlockWithText("hel");
     editor.commands.text.toggleMark({
       blockId: firstId,

@@ -1,4 +1,5 @@
 import type { BlockId, Editor } from "@weaver/core";
+import { getBlock } from "@weaver/core";
 import {
   TEXT_PLACEHOLDER,
   blockElementContaining,
@@ -446,12 +447,27 @@ export const attachEditor = (
       ev.preventDefault();
       const range = readDomSelection(host);
       const blockId = range?.anchor.blockId ?? lastIndentTarget;
-      if (blockId) {
-        if (ev.shiftKey) editor.commands.block.outdent({ blockId });
-        else editor.commands.block.indent({ blockId });
-        lastIndentTarget = blockId;
+      if (!blockId) return;
+      // Inside a code block Tab is literal whitespace, not block structure
+      // (Lexical's CodeNode does the same).
+      const block = getBlock(editor, blockId);
+      if (block?.kind === "code" && !ev.shiftKey && range) {
+        editor.commands.text.insertTab({
+          blockId,
+          offset: range.anchor.offset,
+        });
+        const caret = { blockId, offset: range.anchor.offset + 1 };
+        pendingCaret = { anchor: caret, focus: caret, collapsed: true };
         flushRerender();
+        return;
       }
+      if (ev.shiftKey) editor.commands.block.outdent({ blockId });
+      else editor.commands.block.indent({ blockId });
+      lastIndentTarget = blockId;
+      // Re-anchor the caret after the reconcile — the block element may have
+      // been repositioned, which clears the live DOM selection.
+      if (range) pendingCaret = range;
+      flushRerender();
       return;
     }
 
@@ -635,6 +651,25 @@ export const attachEditor = (
     ensureCaretInBlock(editor, host);
   };
 
+  const onClick = (ev: MouseEvent): void => {
+    // The to-do checkbox affordance is contenteditable=false, so clicks on it
+    // never produce input events — toggle the block's `checked` attr here.
+    // Toggling mutates the doc, so read-only mode swallows it too.
+    if (!editor.isEditable()) return;
+    const target = ev.target instanceof Element ? ev.target : null;
+    const check = target?.closest("[data-todo-check]");
+    if (!check) return;
+    ev.preventDefault();
+    const blockEl = blockElementContaining(host, check);
+    const id = blockEl ? blockIdOf(blockEl) : null;
+    if (!id) return;
+    const block = getBlock(editor, id);
+    if (!block || block.kind !== "to-do") return;
+    const checked = (block.attrs as { checked?: boolean }).checked === true;
+    editor.commands.block.setAttr({ blockId: id, key: "checked", value: !checked });
+    flushRerender();
+  };
+
   const onMouseDown = (ev: MouseEvent): void => {
     // If the click lands directly on the host (outside any block element)
     // intercept it: focus the host ourselves and place the caret inside the
@@ -652,6 +687,7 @@ export const attachEditor = (
   host.addEventListener("compositionend", onCompositionEnd);
   host.addEventListener("focus", onFocus);
   host.addEventListener("mousedown", onMouseDown);
+  host.addEventListener("click", onClick);
   host.addEventListener("copy", onCopy);
   host.addEventListener("cut", onCut);
   host.addEventListener("paste", onPaste);
@@ -679,6 +715,7 @@ export const attachEditor = (
       host.removeEventListener("compositionend", onCompositionEnd);
       host.removeEventListener("focus", onFocus);
       host.removeEventListener("mousedown", onMouseDown);
+      host.removeEventListener("click", onClick);
       host.removeEventListener("copy", onCopy);
       host.removeEventListener("cut", onCut);
       host.removeEventListener("paste", onPaste);

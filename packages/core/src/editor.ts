@@ -815,6 +815,11 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
             }
             applyDeltaMarks(prevText, nextDelta, base);
           }
+          // `tree.delete` removes the whole subtree — adopt `next`'s children
+          // under `prev` first, or nested blocks are silently destroyed.
+          const adopted = next.children() ?? [];
+          const adoptBase = (prev.children() ?? []).length;
+          adopted.forEach((child, i) => child.move(prev, adoptBase + i));
           tree.delete(next.id);
         }),
 
