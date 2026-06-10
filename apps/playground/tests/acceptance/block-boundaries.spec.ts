@@ -243,3 +243,33 @@ test.describe("Tab inside a code block", () => {
     expect(await blockTexts(page)).toEqual(["if x:\ty"]);
   });
 });
+
+test.describe("Enter inside a code block (PR #34 follow-up)", () => {
+  test("Enter is a soft newline — multi-line code stays one block", async ({
+    page,
+  }) => {
+    await page.goto(EMPTY_DOC_URL);
+    await focusEditor(page);
+    await page.keyboard.type("``` ");
+    await page.keyboard.type("line1");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("line2");
+    expect(await blockKinds(page)).toEqual(["code"]);
+    expect(await blockTexts(page)).toEqual(["line1\nline2"]);
+  });
+
+  test("Enter on an empty trailing line exits to a paragraph below", async ({
+    page,
+  }) => {
+    await page.goto(EMPTY_DOC_URL);
+    await focusEditor(page);
+    await page.keyboard.type("``` ");
+    await page.keyboard.type("done()");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("prose continues");
+    expect(await blockKinds(page)).toEqual(["code", "paragraph"]);
+    // The blank exit line is consumed, not left in the code text.
+    expect(await blockTexts(page)).toEqual(["done()", "prose continues"]);
+  });
+});

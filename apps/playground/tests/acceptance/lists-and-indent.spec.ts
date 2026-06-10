@@ -149,3 +149,33 @@ test.describe("to-do checkbox", () => {
     expect(hasCheckable).toBe(true);
   });
 });
+
+test.describe("numbered ordinals (PR #34 follow-up)", () => {
+  const ordinals = (page: Page): Promise<Array<string | null>> =>
+    page.$$eval("[data-weaver-root] [data-block-id]", (nodes) =>
+      nodes.map((n) => n.getAttribute("data-ordinal")),
+    );
+
+  test("consecutive items render 1, 2, 3 — not 1, 1, 1", async ({ page }) => {
+    await page.goto(EMPTY_DOC_URL);
+    await focusEditor(page);
+    await page.keyboard.type("1. alpha");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("beta");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("gamma");
+    expect(await ordinals(page)).toEqual(["1", "2", "3"]);
+  });
+
+  test("an interrupting paragraph restarts the run at 1", async ({ page }) => {
+    await page.goto(EMPTY_DOC_URL);
+    await focusEditor(page);
+    await page.keyboard.type("1. one");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter"); // Enter on the empty item exits the list
+    await page.keyboard.type("plain text");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("1. one again");
+    expect(await ordinals(page)).toEqual(["1", null, "1"]);
+  });
+});

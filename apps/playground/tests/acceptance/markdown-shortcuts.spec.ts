@@ -125,3 +125,26 @@ test.describe("markdown shortcuts — content after the shortcut", () => {
     ]);
   });
 });
+
+test.describe("markdown shortcuts — inline", () => {
+  test("'*italic* ' marks the run italic and strips the stars (PR #34 follow-up)", async ({
+    page,
+  }) => {
+    await page.goto(EMPTY_DOC_URL);
+    await focusEditor(page);
+    await page.keyboard.type("note *italic* ");
+    const em = firstBlock(page).locator("em");
+    await expect(em).toHaveText("italic");
+    await expect(firstBlock(page)).not.toContainText("*");
+  });
+
+  test("'**bold** ' still lands on bold, never half-consumed as italic", async ({
+    page,
+  }) => {
+    await page.goto(EMPTY_DOC_URL);
+    await focusEditor(page);
+    await page.keyboard.type("**bold** ");
+    await expect(firstBlock(page).locator("strong")).toHaveText("bold");
+    expect(await firstBlock(page).locator("em").count()).toBe(0);
+  });
+});
