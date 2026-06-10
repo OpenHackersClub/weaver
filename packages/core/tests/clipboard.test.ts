@@ -423,3 +423,156 @@ describe("@weaver/core / clipboard.pasteText — plain text", () => {
     editor.dispose();
   });
 });
+
+describe("@weaver/core / clipboard — review hardening", () => {
+  it("a multi-block paste is ONE undo step", () => {
+    const { editor, root, id } = editorWithParagraph("ABCD");
+    editor.commands.history.flushMergeWindow();
+    editor.commands.selection.collapse(id, 2);
+    editor.commands.clipboard.paste({
+      text: "xx\nyy",
+      blocks: [
+        { kind: "paragraph", attrs: {}, delta: [{ insert: "xx" }], children: [] },
+        {
+          kind: "heading",
+          attrs: { level: 1 },
+          delta: [{ insert: "yy" }],
+          children: [],
+        },
+      ],
+    });
+    expect(getChildren(editor, root)).toHaveLength(2);
+    editor.commands.history.undo();
+    const children = getChildren(editor, root);
+    expect(children).toHaveLength(1);
+    expect(editor.commands.text.read(children[0]!)).toBe("ABCD");
+    editor.dispose();
+  });
+
+  it("a multi-line pasteText is ONE undo step", () => {
+    const { editor, root, id } = editorWithParagraph("AB");
+    editor.commands.history.flushMergeWindow();
+    editor.commands.selection.collapse(id, 1);
+    editor.commands.clipboard.pasteText("one\ntwo\nthree");
+    expect(getChildren(editor, root)).toHaveLength(3);
+    editor.commands.history.undo();
+    const children = getChildren(editor, root);
+    expect(children).toHaveLength(1);
+    expect(editor.commands.text.read(children[0]!)).toBe("AB");
+    editor.dispose();
+  });
+
+  it("rejects a payload with an unknown block kind WITHOUT mutating the doc", () => {
+    const { editor, root, id } = editorWithParagraph("hello");
+    editor.commands.selection.collapse(id, 2);
+    expect(() =>
+      editor.commands.clipboard.paste({
+        text: "x",
+        blocks: [
+          { kind: "paragraph", attrs: {}, delta: [{ insert: "x" }], children: [] },
+          {
+            kind: "totally-bogus" as never,
+            attrs: {},
+            delta: [{ insert: "y" }],
+            children: [],
+          },
+        ],
+      }),
+    ).toThrow(/kind/);
+    const children = getChildren(editor, root);
+    expect(children).toHaveLength(1);
+    expect(editor.commands.text.read(children[0]!)).toBe("hello");
+    editor.dispose();
+  });
+
+  it("rejects a payload nested beyond the depth cap WITHOUT mutating the doc", () => {
+    const { editor, root, id } = editorWithParagraph("hello");
+    editor.commands.selection.collapse(id, 2);
+    type Frag = {
+      kind: "bullet-list-item";
+      attrs: Record<string, unknown>;
+      delta: Array<{ insert: string }>;
+      children: Frag[];
+    };
+    let frag: Frag = {
+      kind: "bullet-list-item",
+      attrs: {},
+      delta: [{ insert: "leaf" }],
+      children: [],
+    };
+    for (let i = 0; i < 100; i++) {
+      frag = {
+        kind: "bullet-list-item",
+        attrs: {},
+        delta: [{ insert: "n" }],
+        children: [frag],
+      };
+    }
+    expect(() =>
+      editor.commands.clipboard.paste({ text: "", blocks: [frag, frag] }),
+    ).toThrow(/depth/);
+    expect(editor.commands.text.read(getChildren(editor, root)[0]!)).toBe(
+      "hello",
+    );
+    editor.dispose();
+  });
+
+  it("strips unknown and internal mark keys from pasted runs", () => {
+    const { editor, id } = editorWithParagraph("AD");
+    editor.commands.selection.collapse(id, 1);
+    editor.commands.clipboard.paste({
+      text: "bc",
+      blocks: [
+        {
+          kind: "paragraph",
+          attrs: {},
+          delta: [
+            {
+              insert: "bc",
+              attributes: {
+                bold: true,
+                "font-size": "100vw", // unknown key — must not reach the CRDT
+                "agent-pending": "agent-9", // internal — must not transplant
+              },
+            },
+          ],
+          children: [],
+        },
+      ],
+    });
+    expect(editor.commands.text.toDelta(id)).toEqual([
+      { insert: "A" },
+      { insert: "bc", attributes: { bold: true } },
+      { insert: "D" },
+    ]);
+    editor.dispose();
+  });
+
+  it("copies a backward selection (focus before anchor) correctly", () => {
+    const { editor, id: p } = editorWithParagraph("hello");
+    const h = addBlock(editor, "heading", "world", { level: 1 });
+    // Backward: anchor in the LATER block, focus in the EARLIER one.
+    editor.commands.selection.set({
+      anchor: { blockId: h, offset: 3 },
+      focus: { blockId: p, offset: 2 },
+    });
+    const payload = editor.commands.clipboard.copy()!;
+    expect(payload.text).toBe("llo\nwor");
+    expect(payload.blocks.map((b) => b.kind)).toEqual(["paragraph", "heading"]);
+    editor.dispose();
+  });
+
+  it("pasting a non-inline block at offset 0 leaves no empty leading paragraph", () => {
+    const { editor, root, id } = editorWithParagraph("ABCD");
+    editor.commands.selection.collapse(id, 0);
+    editor.commands.clipboard.paste({
+      text: "",
+      blocks: [{ kind: "divider", attrs: {}, children: [] }],
+    });
+    const children = getChildren(editor, root);
+    expect(children).toHaveLength(2);
+    expect(getBlock(editor, children[0]!)!.kind).toBe("divider");
+    expect(editor.commands.text.read(children[1]!)).toBe("ABCD");
+    editor.dispose();
+  });
+});

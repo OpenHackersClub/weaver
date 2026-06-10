@@ -33,6 +33,15 @@ import {
   handleWordDeleteForward,
 } from "./keymap.js";
 
+/**
+ * Clipboard flavor carrying the structured weaver fragment (kinds, attrs,
+ * marks, nesting) between weaver surfaces — specs/lexical-parity.md §3.
+ * `text/plain` interoperates with everything else; HTML import/export is the
+ * @weaver/plugins-html follow-up. Exported so tests and future plugins speak
+ * the same protocol string.
+ */
+export const WEAVER_MIME = "application/x-weaver";
+
 export interface BridgeOptions {
   readonly classList?: ReadonlyArray<string>;
   /**
@@ -521,12 +530,6 @@ export const attachEditor = (
     notifyMentionTrigger();
   };
 
-  // Clipboard — specs/lexical-parity.md §3 (COPY / CUT / PASTE). The
-  // structured flavor `application/x-weaver` carries kinds, attrs, marks and
-  // nesting between weaver surfaces; `text/plain` interoperates with
-  // everything else. HTML import/export is the @weaver/plugins-html follow-up.
-  const WEAVER_MIME = "application/x-weaver";
-
   /** Snapshot the live DOM selection into the core selection state. */
   const syncSelectionFromDom = (): DomRange | null => {
     const range = readDomSelection(host);
@@ -567,19 +570,26 @@ export const attachEditor = (
     e.preventDefault();
     if (!syncSelectionFromDom()) return;
     const structured = e.clipboardData.getData(WEAVER_MIME);
-    if (structured) {
-      try {
-        editor.commands.clipboard.paste(JSON.parse(structured));
-      } catch {
-        // Corrupt flavor (e.g. truncated by another app) — fall back to text.
-        editor.commands.clipboard.pasteText(
-          e.clipboardData.getData("text/plain") ?? "",
-        );
+    try {
+      if (structured) {
+        try {
+          editor.commands.clipboard.paste(JSON.parse(structured));
+        } catch {
+          // Corrupt flavor (e.g. truncated by another app) — fall back to text.
+          editor.commands.clipboard.pasteText(
+            e.clipboardData.getData("text/plain") ?? "",
+          );
+        }
+      } else {
+        const text = e.clipboardData.getData("text/plain");
+        if (!text) return;
+        editor.commands.clipboard.pasteText(text);
       }
-    } else {
-      const text = e.clipboardData.getData("text/plain");
-      if (!text) return;
-      editor.commands.clipboard.pasteText(text);
+    } catch {
+      // The fallback itself can throw (e.g. caret programmatically placed on
+      // a non-inline block) — an unhandled exception from a DOM event
+      // listener helps no one; the paste is simply dropped.
+      return;
     }
     const sel = editor.commands.selection.get();
     if (sel) {

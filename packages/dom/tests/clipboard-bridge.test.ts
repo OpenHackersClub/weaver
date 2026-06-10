@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getChildren, rootId, type ClipboardPayload } from "@weaver/core";
+import { WEAVER_MIME } from "../src/index.js";
 import { writeDomSelection } from "../src/selection-mapper.js";
 import { setupDom, type DomFixture } from "./_dom-helpers.js";
 
@@ -12,8 +13,6 @@ import { setupDom, type DomFixture } from "./_dom-helpers.js";
  * `paste` prefers the structured flavor and falls back to plain text. jsdom
  * has no DataTransfer, so a stub records the flavors.
  */
-
-const WEAVER_MIME = "application/x-weaver";
 
 interface StubClipboardData {
   readonly stored: Map<string, string>;

@@ -12,6 +12,7 @@ import {
   type Block,
   type BlockId,
   type BlockKind,
+  BlockKindSchema,
   ROOT_ID,
   blockKindHasInline,
   defaultAttrsFor,
@@ -51,6 +52,23 @@ const DEFAULT_TEXT_STYLES = {
 
 /** Every mark key the editor knows about — used to clear all formatting. */
 const MARK_KEYS = Object.keys(DEFAULT_TEXT_STYLES);
+
+/** Marks a paste may carry across documents. Internal marks are excluded:
+ *  `agent-pending` points at a live agent session and `comment-anchor` (when
+ *  it lands) at a thread container — neither exists in the target doc, so
+ *  transplanting them would create dangling references. Unknown keys are
+ *  dropped too: they'd be committed to the CRDT (and replicate to every
+ *  peer) while being invisible to the renderer's allowlist. */
+const PASTEABLE_MARK_KEYS = new Set(
+  MARK_KEYS.filter((k) => k !== "agent-pending" && k !== "comment-anchor"),
+);
+
+/** Block kinds a clipboard payload may materialize. */
+const KNOWN_BLOCK_KINDS: ReadonlySet<string> = new Set(BlockKindSchema.literals);
+
+/** Nesting cap for pasted fragments — a crafted payload with deeper nesting
+ *  is rejected up front (stack-overflow guard; see validateClipboardBlocks). */
+const MAX_PASTE_DEPTH = 32;
 
 /** Marks whose Loro text-style `expand` is "after" — inserting at the trailing
  *  edge of these marks causes the new text to inherit the mark. Used by
@@ -538,6 +556,26 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
       principal: { id: v.userId, label: v.label, kind: v.kind },
       origin,
     });
+  };
+
+  /**
+   * Run a composite mutation (paste, multi-line insert) as ONE undo step.
+   * Each inner `withOrigin` still commits separately — the UndoManager group
+   * coalesces them so Ctrl+Z reverts the whole gesture, mirroring Lexical's
+   * `editor.update()` unit. Re-entrancy guarded: `groupStart` throws inside
+   * an active group.
+   */
+  let grouping = false;
+  const withUndoGroup = <T>(fn: () => T): T => {
+    if (grouping || !undo) return fn();
+    grouping = true;
+    undo.groupStart();
+    try {
+      return fn();
+    } finally {
+      undo.groupEnd();
+      grouping = false;
+    }
   };
 
   const textLengthOf = (blockId: BlockId): number => {
@@ -1036,12 +1074,17 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
       paste: (payload) => {
         const blocks = "blocks" in payload ? payload.blocks : undefined;
         if (!blocks || blocks.length === 0) {
-          pasteTextImpl(payload.text);
+          withUndoGroup(() => pasteTextImpl(payload.text));
           return;
         }
-        pasteStructured(blocks);
+        // Validate the FULL payload before any mutation starts — a malformed
+        // fragment discovered mid-paste would otherwise leave the doc with a
+        // partial (split + some blocks) state that no error handler can roll
+        // back.
+        validateClipboardBlocks(blocks, 0);
+        withUndoGroup(() => pasteStructured(blocks));
       },
-      pasteText: (value) => pasteTextImpl(value),
+      pasteText: (value) => withUndoGroup(() => pasteTextImpl(value)),
     },
   };
 
@@ -1175,6 +1218,40 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
     return { text: commands.selection.getTextContent(), blocks: top };
   }
 
+  /**
+   * Reject malformed payloads (foreign apps, crafted clipboard contents)
+   * before any doc mutation: unknown kinds, non-string inserts, nesting past
+   * MAX_PASTE_DEPTH (stack-overflow guard for createFragmentBlock).
+   */
+  function validateClipboardBlocks(
+    blocks: ReadonlyArray<ClipboardFragment>,
+    depth: number,
+  ): void {
+    if (depth > MAX_PASTE_DEPTH) {
+      throw new Error(
+        `clipboard payload exceeds max nesting depth ${MAX_PASTE_DEPTH}`,
+      );
+    }
+    for (const frag of blocks) {
+      if (!frag || typeof frag !== "object") {
+        throw new Error("clipboard fragment must be an object");
+      }
+      if (!KNOWN_BLOCK_KINDS.has(frag.kind as string)) {
+        throw new Error(
+          `clipboard fragment has unknown block kind "${String(frag.kind)}"`,
+        );
+      }
+      if (frag.delta !== undefined) {
+        for (const run of frag.delta) {
+          if (typeof run?.insert !== "string") {
+            throw new Error("clipboard delta run must have a string insert");
+          }
+        }
+      }
+      validateClipboardBlocks(frag.children ?? [], depth + 1);
+    }
+  }
+
   /** Concatenated inline text of a fragment (excluding children). */
   function fragmentTextLength(frag: ClipboardFragment): number {
     return (frag.delta ?? []).reduce((n, run) => n + run.insert.length, 0);
@@ -1213,7 +1290,18 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
       for (const key of bleedKeys) {
         text.unmark({ start: offset, end: offset + value.length }, key);
       }
-      applyDeltaMarks(text, delta as DeltaRun[], offset);
+      // Whitelist marks at the document boundary — see PASTEABLE_MARK_KEYS.
+      const sanitized: DeltaRun[] = delta.map((run) => {
+        if (!run.attributes) return { insert: run.insert };
+        const attributes: Record<string, unknown> = {};
+        for (const [key, v] of Object.entries(run.attributes)) {
+          if (PASTEABLE_MARK_KEYS.has(key)) attributes[key] = v;
+        }
+        return Object.keys(attributes).length > 0
+          ? { insert: run.insert, attributes }
+          : { insert: run.insert };
+      });
+      applyDeltaMarks(text, sanitized, offset);
     });
     return value.length;
   }
@@ -1233,7 +1321,7 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
     if (frag.delta && blockKindHasInline(frag.kind)) {
       insertDeltaInline(id, 0, frag.delta);
     }
-    frag.children.forEach((child, i) => createFragmentBlock(id, i, child));
+    (frag.children ?? []).forEach((child, i) => createFragmentBlock(id, i, child));
     return id;
   }
 
@@ -1268,7 +1356,9 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
 
     const tailId = commands.block.split({ blockId: anchorId, offset });
     let idx = 0;
-    if (isInlineFragment(first) && first.children.length === 0) {
+    const mergedIntoAnchor =
+      isInlineFragment(first) && first.children.length === 0;
+    if (mergedIntoAnchor) {
       insertDeltaInline(anchorId, offset, first.delta!);
       idx = 1;
     }
@@ -1282,6 +1372,18 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
       const frag = blocks[idx]!;
       last = { id: createFragmentBlock(parentId, insertIndex, frag), frag };
       insertIndex += 1;
+    }
+
+    // Mirror of the empty-tail drop below: when nothing merged into the
+    // anchor (first fragment was structural) and the split left it empty —
+    // e.g. pasting a divider at offset 0 — the empty head block is an
+    // artifact of the split, not content.
+    if (
+      !mergedIntoAnchor &&
+      textLengthOf(anchorId) === 0 &&
+      childIds(tree, anchorId).length === 0
+    ) {
+      commands.block.delete({ blockId: anchorId });
     }
 
     if (last && isInlineFragment(last.frag) && last.frag.children.length === 0) {
