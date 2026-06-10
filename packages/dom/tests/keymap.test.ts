@@ -66,6 +66,38 @@ describe("@weaver/dom / Enter splits the current block", () => {
   });
 });
 
+describe("@weaver/dom / Enter inside a code block (PR #34 follow-up)", () => {
+  it("Enter is a soft newline — code lines stay in ONE block", () => {
+    f.type("``` ");
+    f.type("line1");
+    f.press("insertParagraph");
+    f.type("line2");
+    expect(f.blockKinds()).toEqual(["code"]);
+    expect(f.blockTexts()).toEqual(["line1\nline2"]);
+  });
+
+  it("Enter on an empty trailing line exits to a fresh paragraph", () => {
+    f.type("``` ");
+    f.type("const x = 1");
+    f.press("insertParagraph"); // soft newline → empty trailing line
+    f.press("insertParagraph"); // exit: blank line consumed, paragraph below
+    f.type("after");
+    expect(f.blockKinds()).toEqual(["code", "paragraph"]);
+    // The blank exit line never lands in the code text.
+    expect(f.blockTexts()).toEqual(["const x = 1", "after"]);
+  });
+
+  it("Enter in an empty code block stays inside (newline first, exit second)", () => {
+    f.type("``` ");
+    f.press("insertParagraph");
+    expect(f.blockKinds()).toEqual(["code"]);
+    expect(f.blockTexts()).toEqual(["\n"]);
+    f.press("insertParagraph");
+    expect(f.blockKinds()).toEqual(["code", "paragraph"]);
+    expect(f.blockTexts()).toEqual(["", ""]);
+  });
+});
+
 describe("@weaver/dom / Backspace", () => {
   it("Backspace at offset > 0 deletes the previous character", () => {
     f.type("abc");

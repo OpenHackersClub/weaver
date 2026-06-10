@@ -303,6 +303,47 @@ const syncDepth = (el: HTMLElement, depth: number): void => {
   }
 };
 
+const ORDINAL_ATTR = "data-ordinal";
+
+const syncOrdinal = (el: HTMLElement, ordinal: number | null): void => {
+  if (ordinal === null) {
+    if (el.hasAttribute(ORDINAL_ATTR)) el.removeAttribute(ORDINAL_ATTR);
+    return;
+  }
+  if (el.getAttribute(ORDINAL_ATTR) !== String(ordinal)) {
+    el.setAttribute(ORDINAL_ATTR, String(ordinal));
+  }
+};
+
+/**
+ * Running ordinal computation for numbered list items over the flat
+ * document-order render. Blocks render as flat siblings (no `<ol>` to count
+ * inside), so CSS `list-style: decimal` shows "1." on every item — the
+ * ordinal must be computed here and carried as `data-ordinal` for the app's
+ * `::before` to render.
+ *
+ * Semantics (Notion/Lexical): consecutive numbered items at the SAME depth
+ * form one run; a block of any other kind at that depth restarts the run;
+ * deeper blocks (an item's indented children, including nested sublists)
+ * do not break their ancestors' runs; returning to a shallower depth ends
+ * every deeper run, so the next sublist starts back at 1.
+ */
+const createOrdinalTracker = (): ((kind: string | null, depth: number) => number | null) => {
+  const counters = new Map<number, number>();
+  return (kind, depth) => {
+    for (const d of [...counters.keys()]) {
+      if (d > depth) counters.delete(d);
+    }
+    if (kind !== "numbered-list-item") {
+      counters.set(depth, 0);
+      return null;
+    }
+    const ordinal = (counters.get(depth) ?? 0) + 1;
+    counters.set(depth, ordinal);
+    return ordinal;
+  };
+};
+
 /**
  * Render every block — including nested children — into `host` in document
  * order, preserving element identity on re-render (fast path for
@@ -317,6 +358,7 @@ export const reconcileTopLevel = (editor: Editor, host: HTMLElement): void => {
     if (id) present.set(id, child as HTMLElement);
   }
   let prevSibling: HTMLElement | null = null;
+  const ordinalFor = createOrdinalTracker();
   for (const { id, depth } of desired) {
     let el = present.get(id);
     if (!el) {
@@ -334,6 +376,7 @@ export const reconcileTopLevel = (editor: Editor, host: HTMLElement): void => {
       present.set(id, el);
     }
     syncDepth(el, depth);
+    syncOrdinal(el, ordinalFor(el.getAttribute(KIND_ATTR), depth));
     prevSibling = el;
   }
   for (const [id, el] of present) {

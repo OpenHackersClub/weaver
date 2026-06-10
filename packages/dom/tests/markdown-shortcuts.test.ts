@@ -159,6 +159,40 @@ describe("@weaver/dom / markdown shortcuts — inline", () => {
     expect(f.blockTexts()[0]).not.toContain("**");
   });
 
+  it("typing `*italic* ` applies an italic mark to 'italic' and removes the `*` delimiters", () => {
+    f.type("*italic* ");
+    const id = f.blockEls()[0]!.getAttribute("data-block-id")!;
+    const delta = f.editor.commands.text.toDelta(id) as Array<{
+      insert?: string;
+      attributes?: Record<string, unknown>;
+    }>;
+    const italicRun = delta.find((d) => d.attributes?.["italic"]);
+    expect(italicRun?.insert).toBe("italic");
+    expect(f.blockTexts()[0]).not.toContain("*");
+  });
+
+  it("`**bold** ` is never half-consumed by the single-star italic shortcut", () => {
+    f.type("mid **bold** ");
+    const id = f.blockEls()[0]!.getAttribute("data-block-id")!;
+    const delta = f.editor.commands.text.toDelta(id) as Array<{
+      insert?: string;
+      attributes?: Record<string, unknown>;
+    }>;
+    expect(delta.find((d) => d.attributes?.["bold"])?.insert).toBe("bold");
+    expect(delta.find((d) => d.attributes?.["italic"])).toBeUndefined();
+  });
+
+  it("`*italic* ` mid-text marks only the delimited run", () => {
+    f.type("keep *just this* ");
+    const id = f.blockEls()[0]!.getAttribute("data-block-id")!;
+    const delta = f.editor.commands.text.toDelta(id) as Array<{
+      insert?: string;
+      attributes?: Record<string, unknown>;
+    }>;
+    expect(delta.find((d) => d.attributes?.["italic"])?.insert).toBe("just this");
+    expect(f.blockTexts()[0]).toBe("keep just this ");
+  });
+
   it("typing `_italic_ ` applies an italic mark to 'italic' and removes the `_` delimiters", () => {
     f.type("_italic_ ");
     const id = f.blockEls()[0]!.getAttribute("data-block-id")!;

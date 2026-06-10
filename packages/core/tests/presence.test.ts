@@ -127,7 +127,7 @@ describe("@weaver/core / presence — subscribe", () => {
 });
 
 describe("@weaver/core / presence — wire round-trip (specs/presence.md)", () => {
-  it("local updates from one hub apply into another via the wire bytes", () => {
+  it("local updates from one hub apply into another via the wire bytes", async () => {
     const a = createPresenceHub();
     const b = createPresenceHub();
     const unsubscribe = a.subscribeLocalUpdates((bytes) => b.applyRemote(bytes));
@@ -141,7 +141,12 @@ describe("@weaver/core / presence — wire round-trip (specs/presence.md)", () =
     a.set(rec);
     expect(b.all()).toEqual([rec]);
 
-    // A remove propagates too — the clean-exit path.
+    // A remove propagates too — the clean-exit path. EphemeralStore conflicts
+    // are timestamp-LWW at millisecond granularity: a delete in the SAME ms
+    // as the set ties and loses on apply, so let the clock tick first (real
+    // sessions have seconds between publish and clean exit; the inactivity
+    // timeout backstops the pathological tie).
+    await new Promise((r) => setTimeout(r, 5));
     a.remove(rec.peerId);
     expect(b.all()).toEqual([]);
 

@@ -218,8 +218,16 @@ li.weaver-bullet-list-item {
   list-style: disc;
 }
 
+/* Each item is a flat sibling (no <ol> to count inside), so `list-style:
+   decimal` would show "1." on every row. The bridge computes the running
+   ordinal per depth and carries it as data-ordinal. */
 li.weaver-numbered-list-item {
-  list-style: decimal;
+  list-style: none;
+}
+
+li.weaver-numbered-list-item::before {
+  content: attr(data-ordinal) ". ";
+  font-variant-numeric: tabular-nums;
 }
 
 li.weaver-to-do {

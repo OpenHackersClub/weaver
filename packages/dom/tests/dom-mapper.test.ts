@@ -145,6 +145,77 @@ describe("@weaver/dom / reconcileTopLevel", () => {
   });
 });
 
+describe("@weaver/dom / numbered-list ordinals (PR #34 follow-up)", () => {
+  const insert = (kind: "numbered-list-item" | "paragraph" | "bullet-list-item", parentId?: string): string =>
+    editor.commands.block.insert({
+      parentId: parentId ?? rootId(editor),
+      index: getChildren(editor, parentId ?? rootId(editor)).length,
+      kind,
+      attrs: {},
+    });
+
+  const ordinals = (): Array<string | null> =>
+    Array.from(host.querySelectorAll("[data-block-id]")).map((el) =>
+      el.getAttribute("data-ordinal"),
+    );
+
+  it("consecutive items count 1, 2, 3", () => {
+    insert("numbered-list-item");
+    insert("numbered-list-item");
+    insert("numbered-list-item");
+    reconcileTopLevel(editor, host);
+    // First element is the seed paragraph.
+    expect(ordinals()).toEqual([null, "1", "2", "3"]);
+  });
+
+  it("a non-numbered block at the same depth restarts the run", () => {
+    insert("numbered-list-item");
+    insert("numbered-list-item");
+    insert("paragraph");
+    insert("numbered-list-item");
+    reconcileTopLevel(editor, host);
+    expect(ordinals()).toEqual([null, "1", "2", null, "1"]);
+  });
+
+  it("an item's indented children do not break the parent run; sublists restart per parent", () => {
+    const a = insert("numbered-list-item");
+    insert("numbered-list-item", a); // a.1
+    insert("numbered-list-item", a); // a.2
+    const b = insert("numbered-list-item");
+    insert("numbered-list-item", b); // b.1 — new sublist, back to 1
+    reconcileTopLevel(editor, host);
+    // Document order: seed-p, a, a.1, a.2, b, b.1
+    expect(ordinals()).toEqual([null, "1", "1", "2", "2", "1"]);
+  });
+
+  it("ordinals recompute when an item is deleted from the middle", () => {
+    insert("numbered-list-item");
+    const second = insert("numbered-list-item");
+    insert("numbered-list-item");
+    reconcileTopLevel(editor, host);
+    editor.commands.block.delete({ blockId: second });
+    reconcileTopLevel(editor, host);
+    expect(ordinals()).toEqual([null, "1", "2"]);
+  });
+
+  it("the ordinal attribute is dropped when the item transforms away", () => {
+    const id = insert("numbered-list-item");
+    reconcileTopLevel(editor, host);
+    expect(findBlockElement(host, id)!.getAttribute("data-ordinal")).toBe("1");
+    editor.commands.block.transform({ blockId: id, newKind: "paragraph", attrs: {} });
+    reconcileTopLevel(editor, host);
+    expect(findBlockElement(host, id)!.hasAttribute("data-ordinal")).toBe(false);
+  });
+
+  it("bullet items interrupt a numbered run like any other kind", () => {
+    insert("numbered-list-item");
+    insert("bullet-list-item");
+    insert("numbered-list-item");
+    reconcileTopLevel(editor, host);
+    expect(ordinals()).toEqual([null, "1", null, "1"]);
+  });
+});
+
 describe("@weaver/dom / mark rendering", () => {
   it("renders a `<strong>` for a bold run", () => {
     const id = getChildren(editor, rootId(editor))[0]!;

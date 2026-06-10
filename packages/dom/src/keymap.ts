@@ -100,8 +100,13 @@ interface InlineShortcut {
 }
 
 // Trailing-space inline-delimiter shortcuts. Each captures the inner text.
+// Order matters: `**bold**` is tried before `*italic*` so a double-delimiter
+// run is never half-consumed as a single-star match (the `[^*\n]` inner class
+// alone keeps `*italic*` from matching inside `**bold**`, but the explicit
+// order makes the precedence visible).
 const INLINE_SHORTCUTS: ReadonlyArray<InlineShortcut> = [
   { re: /\*\*([^*\n]+)\*\* $/, mark: "bold" },
+  { re: /\*([^*\n]+)\* $/, mark: "italic" },
   { re: /_([^_\n]+)_ $/, mark: "italic" },
   { re: /~~([^~\n]+)~~ $/, mark: "strike" },
   { re: /`([^`\n]+)` $/, mark: "code" },
@@ -248,6 +253,28 @@ export const handleEnter = (editor: Editor, caret: DomCaret): ApplyResult => {
   // Enter on an *empty* list item exits the list — the item becomes a plain
   // paragraph rather than spawning another empty list item.
   const block = getBlock(editor, caret.blockId);
+  // Inside a code block, Enter is a soft newline — code lines live in ONE
+  // block's text (Lexical CodeNode / Notion behavior), never a block split.
+  // Pressing Enter on an empty trailing line exits: the blank line is
+  // consumed and the caret continues in a fresh paragraph below.
+  if (block && block.kind === "code") {
+    const text = editor.commands.text.read(caret.blockId);
+    if (caret.offset >= text.length && text.endsWith("\n")) {
+      editor.commands.text.delete({
+        blockId: caret.blockId,
+        offset: text.length - 1,
+        length: 1,
+      });
+      const newId = insertParagraphAfter(editor, caret.blockId);
+      return { caret: { blockId: newId, offset: 0 } };
+    }
+    editor.commands.text.insert({
+      blockId: caret.blockId,
+      offset: caret.offset,
+      value: "\n",
+    });
+    return { caret: { blockId: caret.blockId, offset: caret.offset + 1 } };
+  }
   if (
     block &&
     LIST_KINDS.has(block.kind) &&
