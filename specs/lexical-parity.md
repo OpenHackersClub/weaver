@@ -68,7 +68,7 @@ Lexical encodes formatting as a bitmask on `TextNode`. weaver encodes it as over
 | `subscript` | — | 🔁 — plugin-supplied mark; not core. |
 | `superscript` | — | 🔁 — plugin-supplied mark; not core. |
 | `highlight` | `highlight` (`color` enum) | ✅ |
-| Custom marks (e.g. comments) | `comment-anchor` (internal) | ✅ |
+| Custom marks (e.g. comments) | `comment-anchor` (internal; `{ threadId }` value — [`packages/core/src/editor.ts`](https://github.com/OpenHackersClub/weaver/blob/main/packages/core/src/editor.ts), rendered by [`packages/dom/src/dom-mapper.ts`](https://github.com/OpenHackersClub/weaver/blob/main/packages/dom/src/dom-mapper.ts)) | ✅ |
 
 ## 3. Commands & editor operations
 

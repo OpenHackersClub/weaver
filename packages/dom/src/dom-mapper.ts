@@ -103,6 +103,21 @@ export const wrapWithMarks = (
     span.appendChild(node);
     node = span;
   }
+  if (attrs["comment-anchor"]) {
+    // Lexical's MarkNode analog (specs/lexical-parity.md §2): the span only
+    // carries the thread hook; highlight styling and the thread UI are the
+    // app's job. A raw Loro op can bypass validateMarkValue and leave
+    // threadId missing — render nothing rather than a hook no app can
+    // resolve to a thread.
+    const val = attrs["comment-anchor"] as { threadId?: string } | undefined;
+    if (val?.threadId) {
+      const span = doc.createElement("span");
+      span.className = "weaver-comment";
+      span.setAttribute("data-comment-thread", val.threadId);
+      span.appendChild(node);
+      node = span;
+    }
+  }
   if (attrs["agent-pending"]) {
     const span = doc.createElement("span");
     span.className = "weaver-agent-pending";
