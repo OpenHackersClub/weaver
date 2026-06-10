@@ -125,3 +125,79 @@ describe("@weaver/core / presence — subscribe", () => {
     hub.dispose();
   });
 });
+
+describe("@weaver/core / presence — wire round-trip (specs/presence.md)", () => {
+  it("local updates from one hub apply into another via the wire bytes", () => {
+    const a = createPresenceHub();
+    const b = createPresenceHub();
+    const unsubscribe = a.subscribeLocalUpdates((bytes) => b.applyRemote(bytes));
+
+    const rec = agentRecord("user:ada#tab1", {
+      principalId: "user:ada",
+      label: "Ada Lovelace",
+      kind: "user",
+      avatarUrl: "https://example.com/ada.png",
+    });
+    a.set(rec);
+    expect(b.all()).toEqual([rec]);
+
+    // A remove propagates too — the clean-exit path.
+    a.remove(rec.peerId);
+    expect(b.all()).toEqual([]);
+
+    unsubscribe();
+    a.dispose();
+    b.dispose();
+  });
+
+  it("applyRemote does not re-fire subscribeLocalUpdates (no relay loop)", () => {
+    const a = createPresenceHub();
+    const b = createPresenceHub();
+    let bLocalFires = 0;
+    const unsubA = a.subscribeLocalUpdates((bytes) => b.applyRemote(bytes));
+    const unsubB = b.subscribeLocalUpdates(() => bLocalFires++);
+
+    a.set(agentRecord("agent-1"));
+    expect(b.all()).toHaveLength(1);
+    expect(bLocalFires).toBe(0);
+
+    unsubA();
+    unsubB();
+    a.dispose();
+    b.dispose();
+  });
+
+  it("encodeAll() carries the full roster to a late joiner", () => {
+    const a = createPresenceHub();
+    a.set(agentRecord("agent-1"));
+    a.set(agentRecord("agent-2"));
+
+    const late = createPresenceHub();
+    late.applyRemote(a.encodeAll());
+    expect(late.all().map((r) => r.peerId).sort()).toEqual([
+      "agent-1",
+      "agent-2",
+    ]);
+
+    a.dispose();
+    late.dispose();
+  });
+
+  it("a record outlives a short timeout only while refreshed (heartbeat)", async () => {
+    const hub = createPresenceHub({ timeoutMs: 150 });
+    hub.set(agentRecord("agent-1"));
+
+    // Refresh (heartbeat) twice across the window — record survives.
+    for (let i = 0; i < 2; i++) {
+      await new Promise((r) => setTimeout(r, 90));
+      hub.set(agentRecord("agent-1"));
+    }
+    expect(hub.all()).toHaveLength(1);
+
+    // Stop heartbeating — record is evicted after the timeout.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(hub.all()).toHaveLength(0);
+
+    hub.dispose();
+  });
+});

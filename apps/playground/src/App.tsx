@@ -9,6 +9,7 @@ import { DebugPanels } from "./debug-panels.js";
 import { createRuntime } from "./agents/runtime.js";
 import { AgentsPanel } from "./agents/agents-panel.js";
 import { PresenceLayer } from "./agents/presence-layer.js";
+import { CollabSession } from "./collab.js";
 
 const ALL_DEBUG_PANELS: ReadonlyArray<DebugPanelId> = ["tree", "ops", "vv", "fps"];
 
@@ -69,9 +70,31 @@ const installDebugGlobals = (editor: ReturnType<typeof useEditor>) => {
   };
 };
 
+/**
+ * Resolve which demo principal this tab is in collab mode: the `?me=` id when
+ * it names a directory entry, otherwise a random human — so two default tabs
+ * (usually) demo as two different people.
+ */
+const pickSelf = (me: string | null) => {
+  const named = PLAYGROUND_PRINCIPALS.find((p) => p.id === me);
+  if (named) return named;
+  const humans = PLAYGROUND_PRINCIPALS.filter((p) => p.kind === "user");
+  return humans[Math.floor(Math.random() * humans.length)]!;
+};
+
 export const App = () => {
   const initial = useMemo(() => readUrlState(window.location.search), []);
-  const editor = useEditor({ origin: "user" });
+  const collab = useMemo(
+    () =>
+      initial.ws !== null
+        ? { wsUrl: initial.ws, docId: initial.doc, self: pickSelf(initial.me) }
+        : null,
+    [initial],
+  );
+  // In collab mode the shared doc's content comes from the relay; a local
+  // seed paragraph per tab would pile up one empty block per joiner.
+  // CollabSession seeds once if the room turns out to be genuinely empty.
+  const editor = useEditor({ origin: "user", seed: collab === null });
   const mentions = useMentions(editor, { principals: PLAYGROUND_PRINCIPALS });
   const [runtime] = useState(() => createRuntime(editor));
   const [example, setExample] = useState<ExampleId>(initial.example);
@@ -95,18 +118,29 @@ export const App = () => {
   // Reseed the visitor's doc on example change. `reset` first stops every
   // agent and clears its internal state so the reseed starts from a clean
   // slate; the agent count is then (re)applied by the effect below.
+  // In collab mode the shared doc is the relay's canonical state — local
+  // seeding would duplicate content into every connected tab, so skip it.
   useEffect(() => {
+    if (collab) return;
     runtime.reset();
     seedExample(editor, example);
-  }, [editor, runtime, example]);
+  }, [editor, runtime, example, collab]);
 
   useEffect(() => {
     runtime.setCount(agents);
   }, [runtime, agents]);
 
   useEffect(() => {
-    writeUrlState({ example, debug, theme, agents });
-  }, [example, debug, theme, agents]);
+    writeUrlState({
+      example,
+      debug,
+      theme,
+      agents,
+      ws: initial.ws,
+      doc: initial.doc,
+      me: collab ? collab.self.id : initial.me,
+    });
+  }, [example, debug, theme, agents, initial, collab]);
 
   useEffect(() => {
     document.documentElement.dataset["theme"] = theme;
@@ -195,6 +229,14 @@ export const App = () => {
           />
           <MentionMenu mentions={mentions} />
           <PresenceLayer editor={editor} presence={runtime.presence} />
+          {collab ? (
+            <CollabSession
+              editor={editor}
+              wsUrl={collab.wsUrl}
+              docId={collab.docId}
+              self={collab.self}
+            />
+          ) : null}
         </main>
         <DebugPanels editor={editor} opLogEditors={opLogEditors} enabled={debug} />
       </div>

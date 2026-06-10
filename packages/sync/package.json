@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@weaver/core": "workspace:*",
+    "@weaver/sync-core": "workspace:*",
     "effect": "^3.21.2"
   },
   "peerDependencies": {

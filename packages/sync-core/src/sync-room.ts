@@ -1,22 +1,31 @@
-import { Effect, Schema } from "effect";
-import { LoroDoc } from "loro-crdt";
+import { Effect, Either, Match, Schema } from "effect";
+import { EphemeralStore, LoroDoc } from "loro-crdt";
+import {
+  type DecodedFrame,
+  FrameDecodeError,
+  FrameKind,
+  decodeFrame,
+  encodeFrame,
+} from "./frame.js";
 
 /**
  * Transport-agnostic relay logic for a single document.
  *
  * A `SyncRoom` owns the *canonical* `LoroDoc` for one doc id and a set of
- * connected peers. It does two things on every inbound frame, mirroring
+ * connected peers. Every inbound frame carries a 1-byte kind tag (`frame.ts`,
+ * `specs/presence.md` §Wire protocol) and is handled per kind, mirroring
  * `specs/architecture.md#6` ("DO per doc: canonical LoroDoc in memory, relays
  * validated updates"):
  *
- *   1. **Import** the update into the canonical doc (CRDT merge). The canonical
- *      doc only exists so a late joiner can be caught up with a single
- *      `export({ mode: "snapshot" })`, and so op-validation (Phase 2b) has a
- *      replica to validate against.
- *   2. **Relay** the *raw* frame bytes to every other peer — no decode on the
- *      hot path, matching the spec's relay fast path. The wire format is the
- *      same one `@weaver/sync`'s `WsBridge` speaks: the body of each frame is a
- *      raw Loro update blob (`doc.export({ mode: "update", from })`).
+ *   - **doc** — import the update into the canonical doc (CRDT merge), then
+ *     relay the raw frame bytes to every other peer. The canonical doc only
+ *     exists so a late joiner can be caught up with a single
+ *     `export({ mode: "snapshot" })`, and so op-validation (Phase 2b) has a
+ *     replica to validate against.
+ *   - **presence** — apply into the room's `EphemeralStore` replica (which both
+ *     validates the bytes and lets a late joiner get the current roster in one
+ *     `encodeAll()`), then relay. Presence is never persisted and never counts
+ *     toward the snapshot cadence.
  *
  * Echo suppression is by connection identity: a frame is never relayed back to
  * the peer it came from. This is the wire equivalent of the `batch.by !==
@@ -33,8 +42,9 @@ import { LoroDoc } from "loro-crdt";
  * NOT here (Phase 2b follow-ups, same deferral as PR #19):
  *   - Biscuit-token auth on the WS upgrade and the per-doc read/write gate.
  *   - Server-side op validation (a Loro WASM verifier) — today we trust peers.
- *   - Subdoc partitioning / per-tier filtered broadcast.
- *   - R2 cold snapshots with GC; presence relay over the wire.
+ *   - Subdoc partitioning / per-tier filtered broadcast (incl. per-tier
+ *     presence filtering — the frame tag reserves the hook point).
+ *   - R2 cold snapshots with GC.
  */
 
 /**
@@ -46,6 +56,14 @@ import { LoroDoc } from "loro-crdt";
  * once.
  */
 export const SNAPSHOT_EVERY_N_FRAMES = 50;
+
+/**
+ * Inactivity timeout for the room's presence replica. Matches the client-side
+ * wire default (`specs/presence.md` §Liveness): a peer's record survives as
+ * long as its ~15 s heartbeat keeps arriving, and a crashed peer's ghost is
+ * evicted within this window.
+ */
+export const PRESENCE_REPLICA_TIMEOUT_MS = 45_000;
 
 /** A single connected peer, abstracted away from the WebSocket runtime. */
 export interface PeerConnection {
@@ -72,14 +90,24 @@ export class FrameImportError extends Schema.TaggedError<FrameImportError>()(
 
 export class SyncRoom {
   private readonly doc: LoroDoc;
+  /**
+   * Presence replica — exists solely so a late joiner gets the current roster
+   * in one `encodeAll()` frame instead of waiting out every peer's next
+   * heartbeat, and so inbound presence bytes are validated before relay.
+   * Memory-only by design: ephemeral state is never persisted.
+   */
+  private readonly presence: EphemeralStore;
   private readonly peers = new Map<string, PeerConnection>();
   /** Whether the canonical doc holds any committed state worth catching up to. */
   private hasContent = false;
-  /** Frames merged since the last persisted snapshot; drives snapshot cadence. */
+  /** Doc frames merged since the last persisted snapshot; drives snapshot cadence. */
   private framesSinceSnapshot = 0;
 
-  constructor(doc?: LoroDoc) {
+  constructor(doc?: LoroDoc, options?: { presenceTimeoutMs?: number }) {
     this.doc = doc ?? new LoroDoc();
+    this.presence = new EphemeralStore(
+      options?.presenceTimeoutMs ?? PRESENCE_REPLICA_TIMEOUT_MS,
+    );
   }
 
   get peerCount(): number {
@@ -113,11 +141,21 @@ export class SyncRoom {
   }
 
   /**
-   * The catch-up snapshot a freshly-joined peer needs to converge with the
-   * canonical state, or `null` when the doc is still empty (nothing to send).
+   * The tagged wire frames a freshly-joined peer needs to converge: the doc
+   * snapshot (when the doc has content) followed by the current presence
+   * roster (when anyone is present). Empty array when there is nothing to send.
    */
-  catchUpSnapshot(): Uint8Array | null {
-    return this.hasContent ? this.doc.export({ mode: "snapshot" }) : null;
+  catchUpFrames(): ReadonlyArray<Uint8Array> {
+    const frames: Uint8Array[] = [];
+    if (this.hasContent) {
+      frames.push(
+        encodeFrame(FrameKind.Doc, this.doc.export({ mode: "snapshot" })),
+      );
+    }
+    if (this.presence.keys().length > 0) {
+      frames.push(encodeFrame(FrameKind.Presence, this.presence.encodeAll()));
+    }
+    return frames;
   }
 
   /** Full snapshot for durable persistence. */
@@ -131,28 +169,64 @@ export class SyncRoom {
   }
 
   /**
-   * Merge an inbound frame into the canonical doc and relay the raw bytes to
-   * every *other* peer. Fails with `FrameImportError` (and relays nothing) if
-   * the bytes don't decode.
+   * Handle one inbound tagged frame: merge/apply its body per kind, then relay
+   * the raw frame bytes to every *other* peer. Fails (and relays nothing) when
+   * the tag is unknown (`FrameDecodeError`) or the body doesn't decode
+   * (`FrameImportError`).
    */
   receiveFrame(
     from: PeerConnection,
     frame: Uint8Array,
+  ): Effect.Effect<void, FrameImportError | FrameDecodeError> {
+    return Either.match(decodeFrame(frame), {
+      onLeft: (error) => Effect.fail(error),
+      onRight: (decoded) =>
+        this.absorb(from, decoded).pipe(
+          Effect.tap(() => Effect.sync(() => this.relay(from, frame))),
+        ),
+    });
+  }
+
+  /** Merge a decoded frame body into the room's replica for its kind. */
+  private absorb(
+    from: PeerConnection,
+    decoded: DecodedFrame,
   ): Effect.Effect<void, FrameImportError> {
-    return Effect.try({
-      try: () => this.doc.import(frame),
-      catch: (cause) => new FrameImportError({ connectionId: from.id, cause }),
-    }).pipe(
-      Effect.tap(() =>
-        Effect.sync(() => {
-          this.hasContent = true;
-          this.framesSinceSnapshot += 1;
-          for (const peer of this.peers.values()) {
-            if (peer.id === from.id) continue;
-            peer.send(frame);
-          }
+    return Match.value(decoded.kind).pipe(
+      Match.when(FrameKind.Doc, () =>
+        Effect.try({
+          try: () => this.doc.import(decoded.body),
+          catch: (cause) =>
+            new FrameImportError({ connectionId: from.id, cause }),
+        }).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              this.hasContent = true;
+              this.framesSinceSnapshot += 1;
+            }),
+          ),
+        ),
+      ),
+      Match.when(FrameKind.Presence, () =>
+        Effect.try({
+          try: () => this.presence.apply(decoded.body),
+          catch: (cause) =>
+            new FrameImportError({ connectionId: from.id, cause }),
         }),
       ),
+      Match.exhaustive,
     );
+  }
+
+  private relay(from: PeerConnection, frame: Uint8Array): void {
+    for (const peer of this.peers.values()) {
+      if (peer.id === from.id) continue;
+      peer.send(frame);
+    }
+  }
+
+  /** Tear down the presence replica's eviction timer (tests / shutdown). */
+  dispose(): void {
+    this.presence.destroy();
   }
 }

@@ -9,6 +9,14 @@ export interface UrlState {
   readonly theme: "light" | "dark";
   /** Number of mock AI agents to enable on load (0..MAX_AGENTS). */
   readonly agents: number;
+  /**
+   * Collab mode (`specs/presence.md` §Playground demo): WebSocket relay URL
+   * (`?ws=ws://127.0.0.1:8787`), shared doc id, and which demo principal this
+   * tab is. All `null`/defaulted when absent — collab is opt-in.
+   */
+  readonly ws: string | null;
+  readonly doc: string;
+  readonly me: string | null;
 }
 
 const ALL_DEBUG: ReadonlySet<DebugPanelId> = new Set(["tree", "ops", "vv", "fps"]);
@@ -42,7 +50,11 @@ export const readUrlState = (search: string): UrlState => {
     agents = example === "agent" ? 2 : 0;
   }
 
-  return { example, debug, theme, agents };
+  const ws = params.get("ws");
+  const doc = params.get("doc") ?? "playground";
+  const me = params.get("me");
+
+  return { example, debug, theme, agents, ws, doc, me };
 };
 
 export const writeUrlState = (state: UrlState): void => {
@@ -53,6 +65,11 @@ export const writeUrlState = (state: UrlState): void => {
   }
   if (state.theme === "dark") params.set("theme", "dark");
   if (state.agents > 0) params.set("agents", String(state.agents));
+  if (state.ws !== null) {
+    params.set("ws", state.ws);
+    if (state.doc !== "playground") params.set("doc", state.doc);
+    if (state.me !== null) params.set("me", state.me);
+  }
   const next = `?${params.toString()}`;
   if (window.location.search !== next) {
     window.history.replaceState({}, "", next);

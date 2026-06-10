@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { LoroDoc } from "loro-crdt";
 import { describe, expect, it } from "vitest";
+import { createPresenceHub, type PresenceRecord } from "@weaver/core";
 import {
   createInMemoryOpfsStore,
   initSync,
@@ -188,5 +189,157 @@ describe("@weaver/sync / initSync — transport", () => {
 
     await Effect.runPromise(handleA.dispose());
     await Effect.runPromise(handleB.dispose());
+  });
+
+  it("pushes pre-existing local state to the peer on connect", async () => {
+    const [bridgeA, bridgeB] = createLoopbackBridges();
+    const docId = "doc-prior";
+
+    // B is listening first (it plays the already-connected relay side).
+    const docB = newDoc(2n);
+    const handleB = await Effect.runPromise(
+      initSync(docB, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: createInMemoryOpfsStore(),
+        bridge: bridgeB,
+      }),
+    );
+
+    // A already has content from BEFORE its sync wiring attached — the seed
+    // commit / offline-edit case. Connecting must push it.
+    const docA = newDoc(1n);
+    writeSomeText(docA, "body", "made offline");
+    const handleA = await Effect.runPromise(
+      initSync(docA, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: createInMemoryOpfsStore(),
+        bridge: bridgeA,
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(docB.getText("body").toString()).toBe("made offline");
+
+    // And causally-dependent follow-up edits keep flowing.
+    const body = docA.getText("body");
+    body.insert(body.length, " + online");
+    docA.commit();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(docB.getText("body").toString()).toBe("made offline + online");
+
+    await Effect.runPromise(handleA.dispose());
+    await Effect.runPromise(handleB.dispose());
+  });
+
+  it("pushes presence published before the wiring attached", async () => {
+    const [bridgeA, bridgeB] = createLoopbackBridges();
+    const docId = "doc-early-presence";
+
+    const docB = newDoc(2n);
+    const hubB = createPresenceHub({ timeoutMs: 60_000 });
+    const handleB = await Effect.runPromise(
+      initSync(docB, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: createInMemoryOpfsStore(),
+        bridge: bridgeB,
+        presence: hubB,
+      }),
+    );
+
+    // The app `set`s its own record on mount — BEFORE the socket exists.
+    const hubA = createPresenceHub({ timeoutMs: 60_000 });
+    hubA.set({
+      peerId: "user:ada#tab1",
+      label: "Ada Lovelace",
+      color: "#8b5cf6",
+      mode: "idle",
+      cursor: null,
+    });
+    const docA = newDoc(1n);
+    const handleA = await Effect.runPromise(
+      initSync(docA, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: createInMemoryOpfsStore(),
+        bridge: bridgeA,
+        presence: hubA,
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(hubB.all().map((r) => r.peerId)).toEqual(["user:ada#tab1"]);
+
+    await Effect.runPromise(handleA.dispose());
+    await Effect.runPromise(handleB.dispose());
+    hubA.dispose();
+    hubB.dispose();
+  });
+
+  it("replicates presence to a peer and keeps it out of storage", async () => {
+    const storeA = createInMemoryOpfsStore();
+    const storeB = createInMemoryOpfsStore();
+    const [bridgeA, bridgeB] = createLoopbackBridges();
+    const docId = "doc-4";
+
+    const docA = newDoc(1n);
+    const docB = newDoc(2n);
+    const hubA = createPresenceHub({ timeoutMs: 60_000 });
+    const hubB = createPresenceHub({ timeoutMs: 60_000 });
+
+    const handleA = await Effect.runPromise(
+      initSync(docA, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: storeA,
+        bridge: bridgeA,
+        presence: hubA,
+      }),
+    );
+    const handleB = await Effect.runPromise(
+      initSync(docB, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: storeB,
+        bridge: bridgeB,
+        presence: hubB,
+      }),
+    );
+
+    const ada: PresenceRecord = {
+      peerId: "user:ada#tab1",
+      principalId: "user:ada",
+      label: "Ada Lovelace",
+      color: "#8b5cf6",
+      kind: "user",
+      mode: "idle",
+      cursor: null,
+    };
+    hubA.set(ada);
+    await new Promise((r) => setTimeout(r, 0));
+
+    // The record arrived at the peer hub…
+    expect(hubB.all()).toEqual([ada]);
+    // …a doc edit still flows on the same socket…
+    writeSomeText(docA, "body", "doc + presence share the wire");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(docB.getText("body").toString()).toBe("doc + presence share the wire");
+    // …and presence never touched durable storage: A's op-log holds exactly
+    // the one doc edit (no presence entries), B's nothing (imports are never
+    // persisted by the receiver).
+    expect(await Effect.runPromise(storeA.loadOps(docId))).toHaveLength(1);
+    expect(await Effect.runPromise(storeB.loadOps(docId))).toHaveLength(0);
+
+    // Clean exit: a remove propagates instantly.
+    hubA.remove(ada.peerId);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(hubB.all()).toEqual([]);
+
+    await Effect.runPromise(handleA.dispose());
+    await Effect.runPromise(handleB.dispose());
+    hubA.dispose();
+    hubB.dispose();
   });
 });

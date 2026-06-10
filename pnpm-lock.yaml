@@ -52,6 +52,9 @@ importers:
       '@weaver/react':
         specifier: workspace:*
         version: link:../../packages/react
+      '@weaver/sync':
+        specifier: workspace:*
+        version: link:../../packages/sync
       effect:
         specifier: ^3.21.2
         version: 3.21.2
@@ -77,6 +80,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.3.4
         version: 4.7.0(vite@6.4.2(@types/node@24.12.4)(tsx@4.22.4)(yaml@2.9.0))
+      '@weaver/server-node':
+        specifier: workspace:*
+        version: link:../../packages/server-node
       typescript:
         specifier: ^5.7.2
         version: 5.9.3
@@ -235,6 +241,9 @@ importers:
       '@weaver/core':
         specifier: workspace:*
         version: link:../core
+      '@weaver/sync-core':
+        specifier: workspace:*
+        version: link:../sync-core
       effect:
         specifier: ^3.21.2
         version: 3.21.2
