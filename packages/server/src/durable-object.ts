@@ -99,8 +99,8 @@ export class WeaverSyncDO extends DurableObject<Env> {
     const peer = this.peerFor(server);
     if (peer) {
       room.register(peer);
-      const snapshot = room.catchUpSnapshot();
-      if (snapshot) peer.send(snapshot);
+      // Tagged doc snapshot + current presence roster (specs/presence.md).
+      for (const frame of room.catchUpFrames()) peer.send(frame);
     }
 
     return new Response(null, { status: 101, webSocket: client });

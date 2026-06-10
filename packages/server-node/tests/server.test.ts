@@ -1,12 +1,14 @@
-import { Effect } from "effect";
-import { LoroDoc } from "loro-crdt";
+import { Effect, Either } from "effect";
+import { EphemeralStore, LoroDoc } from "loro-crdt";
 import { WebSocket } from "ws";
 import { afterEach, beforeEach, expect, it } from "vitest";
+import { FrameKind, decodeFrame, encodeFrame } from "@weaver/sync-core";
 import { inMemoryStore, type SnapshotStore } from "../src/persistence.js";
 import { startServer, type RunningServer } from "../src/server.js";
 
 let server: RunningServer;
 const clients: WebSocket[] = [];
+const stores: EphemeralStore[] = [];
 
 beforeEach(async () => {
   server = await startServer({ port: 0 });
@@ -14,22 +16,27 @@ beforeEach(async () => {
 
 afterEach(async () => {
   for (const ws of clients.splice(0)) ws.terminate();
+  for (const store of stores.splice(0)) store.destroy();
   await server.close();
 });
 
 /**
- * A connected peer that mirrors a real `@weaver/sync` client: one `LoroDoc` fed
- * by every inbound frame, plus local edits sent back as update frames.
+ * A connected peer that mirrors a real `@weaver/sync` client: one `LoroDoc` +
+ * one presence `EphemeralStore`, fed by demuxing every inbound tagged frame,
+ * plus local edits/announcements sent back as tagged frames.
  *
  * The `message` pump is attached at *construction* (before `open`), so no frame
- * — including a catch-up snapshot the server pushes the instant we register — is
+ * — including catch-up frames the server pushes the instant we register — is
  * ever missed in the gap between `open` and a later listener attach.
  */
 interface Peer {
   readonly ws: WebSocket;
   readonly doc: LoroDoc;
+  readonly presence: EphemeralStore;
   /** Resolve once this peer's body text equals `text`. */
   until(text: string): Promise<void>;
+  /** Resolve once this peer sees a presence record under `key`. */
+  untilPresent(key: string): Promise<void>;
 }
 
 function connect(docId: string): Promise<Peer> {
@@ -38,10 +45,21 @@ function connect(docId: string): Promise<Peer> {
   clients.push(ws);
 
   const doc = new LoroDoc();
+  const presence = new EphemeralStore(60_000);
+  stores.push(presence);
   const waiters: Array<{ text: string; resolve: () => void }> = [];
+  const presenceWaiters: Array<{ key: string; resolve: () => void }> = [];
 
   ws.on("message", (data: ArrayBuffer) => {
-    doc.import(new Uint8Array(data));
+    Either.match(decodeFrame(new Uint8Array(data)), {
+      onLeft: (e) => {
+        throw new Error(`server relayed an undecodable frame: ${e.reason}`);
+      },
+      onRight: ({ kind, body }) => {
+        if (kind === FrameKind.Doc) doc.import(body);
+        else presence.apply(body);
+      },
+    });
     const text = doc.getText("body").toString();
     for (let i = waiters.length - 1; i >= 0; i -= 1) {
       if (waiters[i]!.text === text) {
@@ -49,15 +67,27 @@ function connect(docId: string): Promise<Peer> {
         waiters.splice(i, 1);
       }
     }
+    for (let i = presenceWaiters.length - 1; i >= 0; i -= 1) {
+      if (presence.get(presenceWaiters[i]!.key) !== undefined) {
+        presenceWaiters[i]!.resolve();
+        presenceWaiters.splice(i, 1);
+      }
+    }
   });
 
   const peer: Peer = {
     ws,
     doc,
+    presence,
     until: (text) =>
       new Promise((resolve) => {
         if (doc.getText("body").toString() === text) resolve();
         else waiters.push({ text, resolve });
+      }),
+    untilPresent: (key) =>
+      new Promise((resolve) => {
+        if (presence.get(key) !== undefined) resolve();
+        else presenceWaiters.push({ key, resolve });
       }),
   };
 
@@ -67,13 +97,21 @@ function connect(docId: string): Promise<Peer> {
   });
 }
 
-/** Apply a local edit and put the resulting update frame on the wire. */
+/** Apply a local edit and put the resulting tagged update frame on the wire. */
 function edit(peer: Peer, text: string): void {
   const from = peer.doc.version();
   const body = peer.doc.getText("body");
   body.insert(body.length, text);
   peer.doc.commit();
-  peer.ws.send(peer.doc.export({ mode: "update", from }));
+  peer.ws.send(
+    encodeFrame(FrameKind.Doc, peer.doc.export({ mode: "update", from })),
+  );
+}
+
+/** Publish a presence record and put the tagged frame on the wire. */
+function announce(peer: Peer, key: string, label: string): void {
+  peer.presence.set(key, { peerId: key, label });
+  peer.ws.send(encodeFrame(FrameKind.Presence, peer.presence.encode(key)));
 }
 
 const bodyText = (peer: Peer): string => peer.doc.getText("body").toString();
@@ -101,6 +139,25 @@ it("relays a local edit between two ws peers and converges", async () => {
 
   await b.until("hello");
   expect(bodyText(b)).toBe("hello");
+});
+
+it("relays presence between peers and to a late joiner via catch-up", async () => {
+  const a = await connect("presence");
+  const b = await connect("presence");
+
+  announce(a, "user:ada#tab1", "Ada Lovelace");
+  await b.untilPresent("user:ada#tab1");
+  expect(b.presence.get("user:ada#tab1")).toMatchObject({
+    label: "Ada Lovelace",
+  });
+
+  // A fresh peer joining now gets the roster from catch-up frames alone —
+  // no one re-announces.
+  const c = await connect("presence");
+  await c.untilPresent("user:ada#tab1");
+  expect(c.presence.get("user:ada#tab1")).toMatchObject({
+    label: "Ada Lovelace",
+  });
 });
 
 it("catches up a late joiner with the canonical snapshot", async () => {

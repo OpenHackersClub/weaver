@@ -60,5 +60,6 @@ export { connectPeers, type PeerLink } from "./peer-link.js";
 export {
   createPresenceHub,
   type PresenceHub,
+  type PresenceHubOptions,
   type PresenceRecord,
 } from "./presence.js";

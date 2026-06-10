@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { LoroDoc } from "loro-crdt";
 import { describe, expect, it } from "vitest";
+import { createPresenceHub, type PresenceRecord } from "@weaver/core";
 import {
   createInMemoryOpfsStore,
   initSync,
@@ -124,18 +125,36 @@ describe("@weaver/sync / initSync — persistence", () => {
  * A fake `WsBridge` that loops `send` straight back through a paired
  * receiver. Stands in for the real Durable Object until `@weaver/server`
  * lands in Phase 2b.
+ *
+ * Exposes a `fireReconnect()` hook so tests can simulate a genuine
+ * re-establishment without a real socket: it invokes every registered
+ * `onReconnect` handler, exactly as `ws.onopen` does after auto-reconnect.
  */
-const createLoopbackBridges = (): [WsBridge, WsBridge] => {
+interface ControllableBridge extends WsBridge {
+  /** Manually fire registered onReconnect handlers (simulates re-open). */
+  fireReconnect(): void;
+  /** Detach the peer wiring so `send` no longer reaches it ("offline"). */
+  setOnline(online: boolean): void;
+}
+
+const createLoopbackBridges = (): [ControllableBridge, ControllableBridge] => {
   const handlersA = new Set<ReceiveHandler>();
   const handlersB = new Set<ReceiveHandler>();
+  const reconnectA = new Set<() => void>();
+  const reconnectB = new Set<() => void>();
+  const onlineA = { value: true };
+  const onlineB = { value: true };
 
   const make = (
     own: Set<ReceiveHandler>,
     peer: Set<ReceiveHandler>,
-  ): WsBridge => ({
+    reconnect: Set<() => void>,
+    online: { value: boolean },
+  ): ControllableBridge => ({
     connect: () => Effect.void,
     send: (bytes) =>
       Effect.sync(() => {
+        if (!online.value) return;
         for (const h of peer) h(bytes);
       }),
     onReceive: (h) => {
@@ -144,14 +163,30 @@ const createLoopbackBridges = (): [WsBridge, WsBridge] => {
         own.delete(h);
       };
     },
+    onReconnect: (h) => {
+      reconnect.add(h);
+      return () => {
+        reconnect.delete(h);
+      };
+    },
     disconnect: () =>
       Effect.sync(() => {
         own.clear();
+        reconnect.clear();
       }),
     state: () => ({ _kind: "Connected" }) as const,
+    fireReconnect: () => {
+      for (const h of reconnect) h();
+    },
+    setOnline: (value) => {
+      online.value = value;
+    },
   });
 
-  return [make(handlersA, handlersB), make(handlersB, handlersA)];
+  return [
+    make(handlersA, handlersB, reconnectA, onlineA),
+    make(handlersB, handlersA, reconnectB, onlineB),
+  ];
 };
 
 describe("@weaver/sync / initSync — transport", () => {
@@ -188,5 +223,200 @@ describe("@weaver/sync / initSync — transport", () => {
 
     await Effect.runPromise(handleA.dispose());
     await Effect.runPromise(handleB.dispose());
+  });
+
+  it("re-pushes full state after an auto-reconnect", async () => {
+    const [bridgeA, bridgeB] = createLoopbackBridges();
+    const docId = "doc-reconnect";
+
+    const docB = newDoc(2n);
+    const handleB = await Effect.runPromise(
+      initSync(docB, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: createInMemoryOpfsStore(),
+        bridge: bridgeB,
+      }),
+    );
+
+    const docA = newDoc(1n);
+    const handleA = await Effect.runPromise(
+      initSync(docA, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: createInMemoryOpfsStore(),
+        bridge: bridgeA,
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    // A goes "offline": its sends no longer reach B.
+    bridgeA.setOnline(false);
+    writeSomeText(docA, "body", "edited while offline");
+    await new Promise((r) => setTimeout(r, 0));
+    // B never saw the offline edit — the per-edit delta was dropped on the floor.
+    expect(docB.getText("body").toString()).toBe("");
+
+    // Reconnect: A comes back online and the bridge fires onReconnect, which
+    // re-pushes full state. The dropped edit reconciles without a reload.
+    bridgeA.setOnline(true);
+    bridgeA.fireReconnect();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(docB.getText("body").toString()).toBe("edited while offline");
+
+    await Effect.runPromise(handleA.dispose());
+    await Effect.runPromise(handleB.dispose());
+  });
+
+  it("pushes pre-existing local state to the peer on connect", async () => {
+    const [bridgeA, bridgeB] = createLoopbackBridges();
+    const docId = "doc-prior";
+
+    // B is listening first (it plays the already-connected relay side).
+    const docB = newDoc(2n);
+    const handleB = await Effect.runPromise(
+      initSync(docB, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: createInMemoryOpfsStore(),
+        bridge: bridgeB,
+      }),
+    );
+
+    // A already has content from BEFORE its sync wiring attached — the seed
+    // commit / offline-edit case. Connecting must push it.
+    const docA = newDoc(1n);
+    writeSomeText(docA, "body", "made offline");
+    const handleA = await Effect.runPromise(
+      initSync(docA, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: createInMemoryOpfsStore(),
+        bridge: bridgeA,
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(docB.getText("body").toString()).toBe("made offline");
+
+    // And causally-dependent follow-up edits keep flowing.
+    const body = docA.getText("body");
+    body.insert(body.length, " + online");
+    docA.commit();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(docB.getText("body").toString()).toBe("made offline + online");
+
+    await Effect.runPromise(handleA.dispose());
+    await Effect.runPromise(handleB.dispose());
+  });
+
+  it("pushes presence published before the wiring attached", async () => {
+    const [bridgeA, bridgeB] = createLoopbackBridges();
+    const docId = "doc-early-presence";
+
+    const docB = newDoc(2n);
+    const hubB = createPresenceHub({ timeoutMs: 60_000 });
+    const handleB = await Effect.runPromise(
+      initSync(docB, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: createInMemoryOpfsStore(),
+        bridge: bridgeB,
+        presence: hubB,
+      }),
+    );
+
+    // The app `set`s its own record on mount — BEFORE the socket exists.
+    const hubA = createPresenceHub({ timeoutMs: 60_000 });
+    hubA.set({
+      peerId: "user:ada#tab1",
+      label: "Ada Lovelace",
+      color: "#8b5cf6",
+      mode: "idle",
+      cursor: null,
+    });
+    const docA = newDoc(1n);
+    const handleA = await Effect.runPromise(
+      initSync(docA, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: createInMemoryOpfsStore(),
+        bridge: bridgeA,
+        presence: hubA,
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(hubB.all().map((r) => r.peerId)).toEqual(["user:ada#tab1"]);
+
+    await Effect.runPromise(handleA.dispose());
+    await Effect.runPromise(handleB.dispose());
+    hubA.dispose();
+    hubB.dispose();
+  });
+
+  it("replicates presence to a peer and keeps it out of storage", async () => {
+    const storeA = createInMemoryOpfsStore();
+    const storeB = createInMemoryOpfsStore();
+    const [bridgeA, bridgeB] = createLoopbackBridges();
+    const docId = "doc-4";
+
+    const docA = newDoc(1n);
+    const docB = newDoc(2n);
+    const hubA = createPresenceHub({ timeoutMs: 60_000 });
+    const hubB = createPresenceHub({ timeoutMs: 60_000 });
+
+    const handleA = await Effect.runPromise(
+      initSync(docA, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: storeA,
+        bridge: bridgeA,
+        presence: hubA,
+      }),
+    );
+    const handleB = await Effect.runPromise(
+      initSync(docB, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: storeB,
+        bridge: bridgeB,
+        presence: hubB,
+      }),
+    );
+
+    const ada: PresenceRecord = {
+      peerId: "user:ada#tab1",
+      principalId: "user:ada",
+      label: "Ada Lovelace",
+      color: "#8b5cf6",
+      kind: "user",
+      mode: "idle",
+      cursor: null,
+    };
+    hubA.set(ada);
+    await new Promise((r) => setTimeout(r, 0));
+
+    // The record arrived at the peer hub…
+    expect(hubB.all()).toEqual([ada]);
+    // …a doc edit still flows on the same socket…
+    writeSomeText(docA, "body", "doc + presence share the wire");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(docB.getText("body").toString()).toBe("doc + presence share the wire");
+    // …and presence never touched durable storage: A's op-log holds exactly
+    // the one doc edit (no presence entries), B's nothing (imports are never
+    // persisted by the receiver).
+    expect(await Effect.runPromise(storeA.loadOps(docId))).toHaveLength(1);
+    expect(await Effect.runPromise(storeB.loadOps(docId))).toHaveLength(0);
+
+    // Clean exit: a remove propagates instantly.
+    hubA.remove(ada.peerId);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(hubB.all()).toEqual([]);
+
+    await Effect.runPromise(handleA.dispose());
+    await Effect.runPromise(handleB.dispose());
+    hubA.dispose();
+    hubB.dispose();
   });
 });

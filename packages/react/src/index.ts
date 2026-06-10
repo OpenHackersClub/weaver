@@ -20,3 +20,11 @@ export {
   useEditable,
   type UndoState,
 } from "./use-editor-state.js";
+export {
+  PresenceFacepile,
+  usePresence,
+  usePresenceRecords,
+  type PresenceApi,
+  type PresenceFacepileProps,
+  type UsePresenceOptions,
+} from "./presence.js";

@@ -67,6 +67,9 @@ export function startServer(options: ServerOptions = {}): Promise<RunningServer>
         port,
         close: () =>
           new Promise<void>((done) => {
+            // `wss.close` waits for clients to leave on their own; a browser
+            // tab that never says goodbye would hang shutdown forever.
+            for (const client of wss.clients) client.terminate();
             wss.close(() => http.close(() => done()));
           }),
       });
@@ -115,8 +118,8 @@ function onConnection(registry: RoomRegistry, docId: string, ws: WebSocket): voi
     room = resolved;
     room.register(peer);
 
-    const snapshot = room.catchUpSnapshot();
-    if (snapshot) peer.send(snapshot);
+    // Tagged doc snapshot + current presence roster (specs/presence.md).
+    for (const frame of room.catchUpFrames()) peer.send(frame);
 
     // Drain frames received during setup, in arrival order.
     for (const frame of buffered.splice(0)) {

@@ -6,6 +6,7 @@
   "description": "Weaver playground SPA — demos every block kind, mark, and agent affordance.",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5180",
+    "dev:sync": "pnpm --filter @weaver/server-node dev",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 5180",
     "typecheck": "tsc --noEmit",
@@ -15,6 +16,7 @@
     "@weaver/core": "workspace:*",
     "@weaver/dom": "workspace:*",
     "@weaver/react": "workspace:*",
+    "@weaver/sync": "workspace:*",
     "effect": "^3.21.2",
     "loro-crdt": "^1.12.1",
     "react": "^19.0.0",
@@ -22,6 +24,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
+    "@weaver/server-node": "workspace:*",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
