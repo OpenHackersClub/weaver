@@ -1,4 +1,9 @@
-export { attachEditor, type AttachedBridge, type BridgeOptions } from "./bridge.js";
+export {
+  attachEditor,
+  WEAVER_MIME,
+  type AttachedBridge,
+  type BridgeOptions,
+} from "./bridge.js";
 export {
   renderBlockElement,
   reconcileTopLevel,

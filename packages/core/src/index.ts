@@ -38,6 +38,10 @@ export {
   type SelectionCommands,
   type SelectionRange,
   type MarkKind,
+  type ClipboardCommands,
+  type ClipboardPayload,
+  type ClipboardFragment,
+  type ClipboardDeltaRun,
 } from "./editor.js";
 export type {
   Principal,
