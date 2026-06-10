@@ -15,7 +15,7 @@
     "playground:build": "pnpm --filter @weaver/playground build",
     "playground:preview": "pnpm --filter @weaver/playground preview",
     "playground:test": "pnpm --filter @weaver/playground test",
-    "test": "pnpm --filter @weaver/core --filter @weaver/dom --filter @weaver/sync-core --filter @weaver/sync --filter @weaver/server-node --no-bail test"
+    "test": "pnpm --filter @weaver/core --filter @weaver/dom --filter @weaver/react --filter @weaver/sync-core --filter @weaver/sync --filter @weaver/server-node --no-bail test"
   },
   "engines": {
     "node": ">=20.18.0"

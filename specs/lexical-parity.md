@@ -89,13 +89,13 @@ Lexical's command bus is `editor.dispatchCommand(COMMAND, payload)`. weaver's co
 | `CLEAR_HISTORY_COMMAND` | `editor.clearHistory()` — drops the `UndoManager` stack without touching the doc | ✅ |
 | `CLEAR_EDITOR_COMMAND` | `editor.clear()` — replaces the LoroDoc content with the empty-doc template | ✅ |
 | Selection ops (`SELECT_ALL_COMMAND` etc.) | weaver `selection.*` commands operating on `Cursor` anchors | ✅ |
-| `SELECTION_CHANGE_COMMAND` (notification) | `useSelection()` hook subscribes to selection changes; no imperative bus event needed | ✅ |
+| `SELECTION_CHANGE_COMMAND` (notification) | `useSelection()` hook ([`packages/react/src/use-editor-state.ts`](../packages/react/src/use-editor-state.ts)) subscribes via `editor.onSelectionChange`; no imperative bus event needed | ✅ |
 | Keyboard (`KEY_*_COMMAND` family — arrows, enter, backspace, etc.) | core keymap in `@weaver/dom`; plugins register key handlers via the plugin contract | ✅ |
 | Focus / blur (`FOCUS_COMMAND`, `BLUR_COMMAND`) | `editor.focus()` / `editor.blur()` on the surface | ✅ |
 | Drag & drop (`DRAGSTART_COMMAND` / `DRAGOVER_COMMAND` / `DRAGEND_COMMAND` / `DROP_COMMAND`) | drag handle UI dispatches `block.move(blockId, newParentId, newIndex)` | ✅ |
 | Clipboard (`COPY_COMMAND` / `CUT_COMMAND` / `PASTE_COMMAND`) | `clipboard.*` surface ([`packages/core/src/editor.ts`](../packages/core/src/editor.ts), DOM events in [`packages/dom/src/bridge.ts`](../packages/dom/src/bridge.ts)) — plain text + structured `application/x-weaver` JSON fragment (kinds, attrs, marks, nesting); HTML / Markdown codecs land with `@weaver/plugins-html` / `@weaver/plugins-markdown` | ✅ |
-| `CAN_UNDO_COMMAND` / `CAN_REDO_COMMAND` introspection | `useUndoState()` hook | ✅ |
-| Read-only mode | `editor.setEditable(false)` toggle | ✅ |
+| `CAN_UNDO_COMMAND` / `CAN_REDO_COMMAND` introspection | `useUndoState()` hook ([`packages/react/src/use-editor-state.ts`](../packages/react/src/use-editor-state.ts)) | ✅ |
+| Read-only mode | `editor.setEditable(false)` toggle, enforced on the surface by [`packages/dom/src/bridge.ts`](../packages/dom/src/bridge.ts) (`contenteditable` mirror + input guards) | ✅ |
 
 ## 4. Plugins (Lexical's first-party `@lexical/react` set)
 

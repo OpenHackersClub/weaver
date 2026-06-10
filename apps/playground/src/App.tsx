@@ -27,6 +27,8 @@ const installDebugGlobals = (editor: ReturnType<typeof useEditor>) => {
       blocksCount: () => number;
       version: () => unknown;
       tree: () => ReadonlyArray<DebugTreeNode>;
+      setEditable: (editable: boolean) => void;
+      isEditable: () => boolean;
     };
   };
   const buildTree = (parentId: string): DebugTreeNode[] =>
@@ -41,6 +43,8 @@ const installDebugGlobals = (editor: ReturnType<typeof useEditor>) => {
       Array.isArray(editor.tree.toJSON()) ? editor.tree.toJSON().length : 0,
     version: () => Object.fromEntries(editor.doc.version().toJSON()),
     tree: () => buildTree(rootId(editor)),
+    setEditable: (editable: boolean) => editor.setEditable(editable),
+    isEditable: () => editor.isEditable(),
   };
   // Programmatic mention insert — lets acceptance tests exercise the
   // MentionCreated debounce contract without racing real keystrokes.
