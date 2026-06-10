@@ -29,10 +29,19 @@ export type ConnectionState =
 
 export type ReceiveHandler = (bytes: Uint8Array) => void;
 
+export type ReconnectHandler = () => void;
+
 export interface WsBridge {
   connect(url: string): Effect.Effect<void, WsBridgeError>;
   send(opsBytes: Uint8Array): Effect.Effect<void, WsBridgeError>;
   onReceive(handler: ReceiveHandler): () => void;
+  /**
+   * Fires on a *genuine re-establishment* of a connection that previously
+   * reached OPEN — i.e. an auto-reconnect, not the first connect. Callers use
+   * it to re-push connect-time full state (the doc + presence the relay lost
+   * track of while we were gone). Returns an unsubscribe fn.
+   */
+  onReconnect(handler: ReconnectHandler): () => void;
   disconnect(): Effect.Effect<void>;
   state(): ConnectionState;
 }
@@ -74,6 +83,7 @@ export const createWsBridge = (options: WsBridgeOptions = {}): WsBridge => {
   // drops of a connection that actually established.
   let everConnected = false;
   const handlers = new Set<ReceiveHandler>();
+  const reconnectHandlers = new Set<ReconnectHandler>();
 
   const scheduleReconnect = () => {
     if (!autoReconnect || !url || intentionalClose) return;
@@ -100,9 +110,16 @@ export const createWsBridge = (options: WsBridgeOptions = {}): WsBridge => {
 
         ws.onopen = () => {
           attempt = 0;
+          // A re-OPEN of a socket that already reached OPEN once is a genuine
+          // re-establishment — notify reconnect handlers so the caller can
+          // re-push connect-time full state.
+          const isReconnect = everConnected;
           everConnected = true;
           state = { _kind: "Connected" };
           resume(Effect.void);
+          if (isReconnect) {
+            for (const h of reconnectHandlers) h();
+          }
         };
 
         ws.onmessage = (event) => {
@@ -182,6 +199,13 @@ export const createWsBridge = (options: WsBridgeOptions = {}): WsBridge => {
       };
     },
 
+    onReconnect: (handler) => {
+      reconnectHandlers.add(handler);
+      return () => {
+        reconnectHandlers.delete(handler);
+      };
+    },
+
     disconnect: () =>
       Effect.sync(() => {
         intentionalClose = true;
@@ -195,6 +219,7 @@ export const createWsBridge = (options: WsBridgeOptions = {}): WsBridge => {
         socket = null;
         state = { _kind: "Disconnected" };
         handlers.clear();
+        reconnectHandlers.clear();
       }),
 
     state: () => state,

@@ -25,6 +25,7 @@ export {
   type WsBridgeOptions,
   type ConnectionState,
   type ReceiveHandler,
+  type ReconnectHandler,
   WsBridgeError,
   createWsBridge,
   defaultConnectRetry,
@@ -212,6 +213,7 @@ export const initSync = (
     // 4. Locally-originated presence updates → tagged presence frames.
     let unsubscribeWs: (() => void) | null = null;
     let unsubscribePresence: (() => void) | null = null;
+    let unsubscribeReconnect: (() => void) | null = null;
     const presence = options.presence ?? null;
     if (bridge && wsUrl) {
       unsubscribeWs = bridge.onReceive((bytes) => {
@@ -251,38 +253,56 @@ export const initSync = (
         });
       }
 
-      yield* bridge.connect(wsUrl);
-
       // Push everything we already know (OPFS-rehydrated state, seed commits
       // made before this wiring attached) up to the relay in one full update.
       // Without this, later deltas reference ops the canonical doc never saw
       // and remote peers stall on missing causal deps. Loro dedups on import,
-      // so overlap with the server's state is harmless. Catch-up after a
-      // mid-session reconnect is the Phase 2b version-vector handshake.
-      track(
-        Effect.runPromise(
-          bridge.send(encodeFrame(FrameKind.Doc, doc.export({ mode: "update" }))).pipe(
-            Effect.catchTag("WsBridgeError", (e) =>
-              Effect.logWarning("initial state push failed", e),
-            ),
-          ),
-        ),
-      );
-
-      // Same for presence: records published before this wiring attached
-      // (apps typically `set` their own record on mount, before the socket is
-      // up) would otherwise wait out a full heartbeat to become visible.
-      if (presence && presence.all().length > 0) {
+      // so overlap with the server's state is harmless.
+      //
+      // This is deliberately dumb: it re-exports the *full* history every time,
+      // not a version-vector delta. Version-vector delta sync (only the ops the
+      // relay is missing) is the Phase 2b handshake; here, on connect AND on
+      // every auto-reconnect, we just dump everything and let Loro dedup.
+      const pushFullState = (): void => {
         track(
           Effect.runPromise(
-            bridge.send(encodeFrame(FrameKind.Presence, presence.encodeAll())).pipe(
-              Effect.catchTag("WsBridgeError", (e) =>
-                Effect.logWarning("initial presence push failed", e),
+            bridge
+              .send(encodeFrame(FrameKind.Doc, doc.export({ mode: "update" })))
+              .pipe(
+                Effect.catchTag("WsBridgeError", (e) =>
+                  Effect.logWarning("full state push failed", e),
+                ),
               ),
-            ),
           ),
         );
-      }
+
+        // Same for presence: records published before this wiring attached
+        // (apps typically `set` their own record on mount, before the socket
+        // is up) would otherwise wait out a full heartbeat to become visible.
+        if (presence && presence.all().length > 0) {
+          track(
+            Effect.runPromise(
+              bridge
+                .send(encodeFrame(FrameKind.Presence, presence.encodeAll()))
+                .pipe(
+                  Effect.catchTag("WsBridgeError", (e) =>
+                    Effect.logWarning("full presence push failed", e),
+                  ),
+                ),
+            ),
+          );
+        }
+      };
+
+      // Re-push on every genuine re-establishment. The bridge auto-reconnects
+      // internally, but doc edits made while disconnected never reconcile until
+      // we re-dump full state — the connect-time push runs only once otherwise.
+      unsubscribeReconnect = bridge.onReconnect(pushFullState);
+
+      yield* bridge.connect(wsUrl);
+
+      // First-connect push.
+      pushFullState();
     }
 
     return {
@@ -296,6 +316,7 @@ export const initSync = (
           docSub();
           if (unsubscribePresence) unsubscribePresence();
           if (unsubscribeWs) unsubscribeWs();
+          if (unsubscribeReconnect) unsubscribeReconnect();
           yield* Effect.promise(() => Promise.all([...pending]));
           if (bridge) yield* bridge.disconnect();
         }),

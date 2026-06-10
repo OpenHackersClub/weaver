@@ -125,18 +125,36 @@ describe("@weaver/sync / initSync — persistence", () => {
  * A fake `WsBridge` that loops `send` straight back through a paired
  * receiver. Stands in for the real Durable Object until `@weaver/server`
  * lands in Phase 2b.
+ *
+ * Exposes a `fireReconnect()` hook so tests can simulate a genuine
+ * re-establishment without a real socket: it invokes every registered
+ * `onReconnect` handler, exactly as `ws.onopen` does after auto-reconnect.
  */
-const createLoopbackBridges = (): [WsBridge, WsBridge] => {
+interface ControllableBridge extends WsBridge {
+  /** Manually fire registered onReconnect handlers (simulates re-open). */
+  fireReconnect(): void;
+  /** Detach the peer wiring so `send` no longer reaches it ("offline"). */
+  setOnline(online: boolean): void;
+}
+
+const createLoopbackBridges = (): [ControllableBridge, ControllableBridge] => {
   const handlersA = new Set<ReceiveHandler>();
   const handlersB = new Set<ReceiveHandler>();
+  const reconnectA = new Set<() => void>();
+  const reconnectB = new Set<() => void>();
+  const onlineA = { value: true };
+  const onlineB = { value: true };
 
   const make = (
     own: Set<ReceiveHandler>,
     peer: Set<ReceiveHandler>,
-  ): WsBridge => ({
+    reconnect: Set<() => void>,
+    online: { value: boolean },
+  ): ControllableBridge => ({
     connect: () => Effect.void,
     send: (bytes) =>
       Effect.sync(() => {
+        if (!online.value) return;
         for (const h of peer) h(bytes);
       }),
     onReceive: (h) => {
@@ -145,14 +163,30 @@ const createLoopbackBridges = (): [WsBridge, WsBridge] => {
         own.delete(h);
       };
     },
+    onReconnect: (h) => {
+      reconnect.add(h);
+      return () => {
+        reconnect.delete(h);
+      };
+    },
     disconnect: () =>
       Effect.sync(() => {
         own.clear();
+        reconnect.clear();
       }),
     state: () => ({ _kind: "Connected" }) as const,
+    fireReconnect: () => {
+      for (const h of reconnect) h();
+    },
+    setOnline: (value) => {
+      online.value = value;
+    },
   });
 
-  return [make(handlersA, handlersB), make(handlersB, handlersA)];
+  return [
+    make(handlersA, handlersB, reconnectA, onlineA),
+    make(handlersB, handlersA, reconnectB, onlineB),
+  ];
 };
 
 describe("@weaver/sync / initSync — transport", () => {
@@ -186,6 +220,49 @@ describe("@weaver/sync / initSync — transport", () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(docB.getText("body").toString()).toBe("from A");
+
+    await Effect.runPromise(handleA.dispose());
+    await Effect.runPromise(handleB.dispose());
+  });
+
+  it("re-pushes full state after an auto-reconnect", async () => {
+    const [bridgeA, bridgeB] = createLoopbackBridges();
+    const docId = "doc-reconnect";
+
+    const docB = newDoc(2n);
+    const handleB = await Effect.runPromise(
+      initSync(docB, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: createInMemoryOpfsStore(),
+        bridge: bridgeB,
+      }),
+    );
+
+    const docA = newDoc(1n);
+    const handleA = await Effect.runPromise(
+      initSync(docA, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: createInMemoryOpfsStore(),
+        bridge: bridgeA,
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    // A goes "offline": its sends no longer reach B.
+    bridgeA.setOnline(false);
+    writeSomeText(docA, "body", "edited while offline");
+    await new Promise((r) => setTimeout(r, 0));
+    // B never saw the offline edit — the per-edit delta was dropped on the floor.
+    expect(docB.getText("body").toString()).toBe("");
+
+    // Reconnect: A comes back online and the bridge fires onReconnect, which
+    // re-pushes full state. The dropped edit reconciles without a reload.
+    bridgeA.setOnline(true);
+    bridgeA.fireReconnect();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(docB.getText("body").toString()).toBe("edited while offline");
 
     await Effect.runPromise(handleA.dispose());
     await Effect.runPromise(handleB.dispose());
