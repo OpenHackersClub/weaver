@@ -11,9 +11,12 @@ import { type PresenceCursor, attachPresenceOverlay } from "@weaver/dom";
 export const PresenceLayer = ({
   editor,
   presence,
+  excludePeerId,
 }: {
   editor: Editor;
   presence: PresenceHub;
+  /** Session to omit — the local user's own caret is the real DOM caret. */
+  excludePeerId?: string;
 }) => {
   useEffect(() => {
     // EditorRoot (a sibling rendered before this component) has already
@@ -28,7 +31,7 @@ export const PresenceLayer = ({
     const draw = (): void => {
       const cursors: PresenceCursor[] = presence
         .all()
-        .filter((r) => r.cursor !== null)
+        .filter((r) => r.cursor !== null && r.peerId !== excludePeerId)
         .map((r) => ({
           peerId: r.peerId,
           label: r.label,
@@ -47,7 +50,7 @@ export const PresenceLayer = ({
       unsubDoc();
       overlay.dispose();
     };
-  }, [editor, presence]);
+  }, [editor, presence, excludePeerId]);
 
   return null;
 };

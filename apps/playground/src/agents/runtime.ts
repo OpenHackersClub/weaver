@@ -31,18 +31,33 @@ import {
   pickScriptForPrompt,
 } from "./scripts.js";
 
-export const MAX_AGENTS = 3;
+/**
+ * The demo agent roster. Ids follow the `agent-<name>` convention (mirrored in
+ * `principals.ts` so a mention of an agent and its presence record read as the
+ * same identity); colors are stable per agent and shared with the caret + op
+ * chip tints.
+ */
+const AGENT_DIRECTORY: ReadonlyArray<{
+  readonly id: string;
+  readonly label: string;
+  readonly color: string;
+}> = [
+  { id: "agent-richard", label: "Agent Richard", color: "#e0245e" },
+  { id: "agent-jared", label: "Agent Jared", color: "#1d9bf0" },
+  { id: "agent-erlich", label: "Agent Erlich", color: "#17bf63" },
+];
+
+export const MAX_AGENTS = AGENT_DIRECTORY.length;
 const DEFAULT_SPEED_MS = 220;
-/** One stable color per agent index — used for the caret + the op chip. */
-const AGENT_COLORS: Record<number, string> = {
-  1: "#e0245e",
-  2: "#1d9bf0",
-  3: "#17bf63",
-};
+/**
+ * Re-publish cadence keeping agent records alive on wire-connected hubs (45 s
+ * eviction window) — same beat as `usePresence`'s human heartbeat.
+ */
+const AGENT_HEARTBEAT_MS = 15_000;
 
 /** A single agent as the React UI sees it. */
 export interface AgentView {
-  readonly id: string; // "agent-1"
+  readonly id: string; // "agent-richard"
   readonly index: number; // 1..MAX_AGENTS
   readonly label: string; // "Agent 1"
   readonly color: string;
@@ -87,25 +102,48 @@ interface Agent {
   streamed: number;
   /** True once the script has run to completion (stays "present" but idle). */
   done: boolean;
+  /** Last published presence mode; `null` while not present in the hub. */
+  mode: "generating" | "idle" | null;
 }
 
-export const createRuntime = (main: Editor): MockAgentRuntime => {
-  const presence = createPresenceHub();
+export interface MockAgentRuntimeOptions {
+  /**
+   * Share an app-owned hub (collab mode) instead of creating a local one, so
+   * agent presence rides the same wire as human presence and shows up in
+   * remote tabs' facepiles/carets. A shared hub is NOT disposed by the
+   * runtime — its creator owns teardown.
+   */
+  readonly presence?: PresenceHub;
+}
+
+export const createRuntime = (
+  main: Editor,
+  options: MockAgentRuntimeOptions = {},
+): MockAgentRuntime => {
+  const ownsHub = options.presence === undefined;
+  const presence = options.presence ?? createPresenceHub();
   let speedMs = DEFAULT_SPEED_MS;
+
+  // Presence store keys must be unique per session (`specs/presence.md`
+  // §State layering): two collab tabs both running "agent-richard" publish two
+  // records that dedupe to one facepile face via `principalId`.
+  const session = Math.random().toString(36).slice(2, 8);
 
   const agents: Agent[] = [];
   for (let i = 1; i <= MAX_AGENTS; i++) {
+    const entry = AGENT_DIRECTORY[i - 1]!;
     agents.push({
       index: i,
-      id: `agent-${i}`,
-      label: `Agent ${i}`,
-      color: AGENT_COLORS[i]!,
-      editor: createEditor({ origin: `agent-${i}`, seed: false }),
+      id: entry.id,
+      label: entry.label,
+      color: entry.color,
+      editor: createEditor({ origin: entry.id, seed: false }),
       scriptId: DEFAULT_SCRIPT_FOR[i]!,
       blockId: null,
       fiber: null,
       streamed: 0,
       done: false,
+      mode: null,
     });
   }
 
@@ -147,12 +185,17 @@ export const createRuntime = (main: Editor): MockAgentRuntime => {
     Effect.runSync(SubscriptionRef.set(stateRef, next));
   };
 
+  const peerIdOf = (a: Agent): string => `${a.id}#${session}`;
+
   const publishPresence = (a: Agent, mode: "generating" | "idle"): void => {
     if (a.blockId === null) return;
+    a.mode = mode;
     presence.set({
-      peerId: a.id,
+      peerId: peerIdOf(a),
+      principalId: a.id,
       label: a.label,
       color: a.color,
+      kind: "agent",
       mode,
       cursor: {
         blockId: a.blockId,
@@ -160,6 +203,19 @@ export const createRuntime = (main: Editor): MockAgentRuntime => {
       },
     });
   };
+
+  const removePresence = (a: Agent): void => {
+    a.mode = null;
+    presence.remove(peerIdOf(a));
+  };
+
+  // Without a beat, an idle-but-present agent would be reaped by a wire hub's
+  // 45 s inactivity eviction mid-demo (the in-tab default hub never evicts).
+  const heartbeat = setInterval(() => {
+    for (const a of agents) {
+      if (a.mode !== null) publishPresence(a, a.mode);
+    }
+  }, AGENT_HEARTBEAT_MS);
 
   /** Commit one streamed chunk into the agent's own block. */
   const streamChunk = (a: Agent, chunk: string): void => {
@@ -227,7 +283,7 @@ export const createRuntime = (main: Editor): MockAgentRuntime => {
       Effect.runFork(Fiber.interrupt(a.fiber));
       a.fiber = null;
     }
-    presence.remove(a.id);
+    removePresence(a);
     commitState();
   };
 
@@ -246,7 +302,7 @@ export const createRuntime = (main: Editor): MockAgentRuntime => {
     while (a.editor.commands.history.canUndo() && guard-- > 0) {
       a.editor.commands.history.undo();
     }
-    presence.remove(a.id);
+    removePresence(a);
     a.blockId = null;
     a.streamed = 0;
     a.done = false;
@@ -298,7 +354,7 @@ export const createRuntime = (main: Editor): MockAgentRuntime => {
         Effect.runFork(Fiber.interrupt(a.fiber));
         a.fiber = null;
       }
-      presence.remove(a.id);
+      removePresence(a);
       // No undo here — the caller reseeds the doc, which clears every block.
       a.blockId = null;
       a.streamed = 0;
@@ -309,11 +365,12 @@ export const createRuntime = (main: Editor): MockAgentRuntime => {
   };
 
   const dispose = (): void => {
+    clearInterval(heartbeat);
     for (const a of agents) {
       if (a.fiber !== null) Effect.runFork(Fiber.interrupt(a.fiber));
     }
     link.dispose();
-    presence.dispose();
+    if (ownsHub) presence.dispose();
     for (const a of agents) a.editor.dispose();
   };
 

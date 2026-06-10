@@ -225,6 +225,52 @@ describe("@weaver/sync / initSync — transport", () => {
     await Effect.runPromise(handleB.dispose());
   });
 
+  it("replicates an in-tab peer editor's imported ops (mock-agent shape) to the wire", async () => {
+    const storeA = createInMemoryOpfsStore();
+    const storeB = createInMemoryOpfsStore();
+    const [bridgeA, bridgeB] = createLoopbackBridges();
+    const docId = "doc-agent-peer";
+
+    const docA = newDoc(1n);
+    const docB = newDoc(2n);
+
+    const handleA = await Effect.runPromise(
+      initSync(docA, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: storeA,
+        bridge: bridgeA,
+      }),
+    );
+    const handleB = await Effect.runPromise(
+      initSync(docB, {
+        docId,
+        wsUrl: "ws://loopback",
+        store: storeB,
+        bridge: bridgeB,
+      }),
+    );
+
+    // An in-tab agent peer (the `connectPeers` shape): a distinct LoroDoc
+    // whose committed delta is IMPORTED into the synced doc — `by: "import"`,
+    // not `by: "local"`. It must still ride the wire to remote peers.
+    const agentDoc = newDoc(3n);
+    writeSomeText(agentDoc, "body", "from agent");
+    docA.import(agentDoc.export({ mode: "update" }));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(docB.getText("body").toString()).toBe("from agent");
+
+    // And the wire frame that delivered it to B must NOT echo back out —
+    // B's storage append is fine, but A converging means no infinite loop;
+    // settle a few ticks and verify both sides are stable.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(docA.getText("body").toString()).toBe("from agent");
+
+    await Effect.runPromise(handleA.dispose());
+    await Effect.runPromise(handleB.dispose());
+  });
+
   it("re-pushes full state after an auto-reconnect", async () => {
     const [bridgeA, bridgeB] = createLoopbackBridges();
     const docId = "doc-reconnect";

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PresenceHub, PresenceRecord, Principal } from "@weaver/core";
 
 /**
@@ -28,6 +28,14 @@ export interface UsePresenceOptions {
   readonly sessionId?: string;
   /** Re-publish interval keeping the record alive. Default 15 s. */
   readonly heartbeatMs?: number;
+  /**
+   * The local caret to carry on the record, so remote peers render this
+   * session in their caret overlay — not just the facepile. Cursors and
+   * presence draw from the SAME record set; a roster entry without a caret
+   * is only ever a session that has no selection placed. Re-publishes on
+   * every change.
+   */
+  readonly cursor?: PresenceRecord["cursor"];
 }
 
 export interface PresenceApi {
@@ -65,20 +73,27 @@ export const usePresence = (
   );
   const peers = usePresenceRecords(hub);
 
-  useEffect(() => {
-    const publish = (): void => {
-      hub.set({
-        peerId: selfPeerId,
-        principalId: self.id,
-        label: self.label,
-        color: self.color ?? "#64748b",
-        kind: self.kind,
-        ...(self.avatarUrl !== undefined ? { avatarUrl: self.avatarUrl } : {}),
-        mode: "idle",
-        cursor: null,
-      });
-    };
+  // The caret rides a ref so a moving cursor re-publishes (cheap `hub.set`)
+  // WITHOUT tearing down the heartbeat effect — a remove+set per keystroke
+  // would broadcast spurious roster churn to every peer.
+  const cursor = options.cursor ?? null;
+  const cursorRef = useRef<PresenceRecord["cursor"]>(cursor);
+  cursorRef.current = cursor;
 
+  const publish = useCallback((): void => {
+    hub.set({
+      peerId: selfPeerId,
+      principalId: self.id,
+      label: self.label,
+      color: self.color ?? "#64748b",
+      kind: self.kind,
+      ...(self.avatarUrl !== undefined ? { avatarUrl: self.avatarUrl } : {}),
+      mode: "idle",
+      cursor: cursorRef.current,
+    });
+  }, [hub, selfPeerId, self]);
+
+  useEffect(() => {
     publish();
     const beat = setInterval(publish, heartbeatMs);
     // Best-effort instant removal when the tab closes while the socket is
@@ -91,7 +106,12 @@ export const usePresence = (
       window.removeEventListener("beforeunload", onBeforeUnload);
       hub.remove(selfPeerId);
     };
-  }, [hub, selfPeerId, self, heartbeatMs]);
+  }, [hub, selfPeerId, publish, heartbeatMs]);
+
+  // Live caret: a selection change re-publishes the record in place.
+  useEffect(() => {
+    publish();
+  }, [publish, cursor]);
 
   return useMemo(() => ({ peers, selfPeerId }), [peers, selfPeerId]);
 };

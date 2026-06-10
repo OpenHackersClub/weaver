@@ -13,8 +13,8 @@ import { test, expect, type Page } from "@playwright/test";
  * of the app (DOM selectors + URL params + the `window.__weaver_debug` global
  * already used by `editor.spec.ts`) — never app internals.
  *
- * Mock agents are scripted/deterministic: agent-N's canned script inserts a
- * sentence containing the literal substring `agent-N`. There is no LLM and no
+ * Mock agents are scripted/deterministic: each agent's canned script inserts a
+ * sentence containing its literal `agent-<name>` id. There is no LLM and no
  * `/api/ai/*` traffic; the scripted runtime never makes a network call.
  */
 
@@ -72,8 +72,8 @@ test.describe("Mock AI agents", () => {
 
     await page.locator('[data-agents-set="2"]').click();
     await expect(page.locator("[data-agent-row]")).toHaveCount(2);
-    await expect(page.locator('[data-agent-row="agent-1"]')).toBeVisible();
-    await expect(page.locator('[data-agent-row="agent-2"]')).toBeVisible();
+    await expect(page.locator('[data-agent-row="agent-richard"]')).toBeVisible();
+    await expect(page.locator('[data-agent-row="agent-jared"]')).toBeVisible();
   });
 
   // Rubric: "reachable ... via the ?agents=<n> permalink param" +
@@ -85,9 +85,15 @@ test.describe("Mock AI agents", () => {
     await focusEditor(page);
 
     // Auto-retrying assertion: carets appear once the agent peers join.
+    // Presence store keys are session-scoped (`agent-richard#<session>`), so
+    // match on the stable principal prefix.
     await expect(page.locator("[data-presence-peer]")).toHaveCount(2);
-    await expect(page.locator('[data-presence-peer="agent-1"]')).toBeVisible();
-    await expect(page.locator('[data-presence-peer="agent-2"]')).toBeVisible();
+    await expect(
+      page.locator('[data-presence-peer^="agent-richard"]'),
+    ).toBeVisible();
+    await expect(
+      page.locator('[data-presence-peer^="agent-jared"]'),
+    ).toBeVisible();
   });
 
   // Rubric: "each agent's ops appearing in the op-log overlay tagged
@@ -102,8 +108,8 @@ test.describe("Mock AI agents", () => {
     await expect(opLog).toBeVisible();
 
     // Agents stream asynchronously — wait for each origin to show up.
-    await expect(opLog).toContainText("origin=agent-1");
-    await expect(opLog).toContainText("origin=agent-2");
+    await expect(opLog).toContainText("origin=agent-richard");
+    await expect(opLog).toContainText("origin=agent-jared");
   });
 
   // Rubric: "At least one streaming insertion from a running mock agent
@@ -118,7 +124,7 @@ test.describe("Mock AI agents", () => {
     const pending = page.locator("span.weaver-agent-pending");
     await expect(pending.first()).toBeVisible();
     await expect(
-      page.locator('span.weaver-agent-pending[data-agent="agent-1"]').first(),
+      page.locator('span.weaver-agent-pending[data-agent="agent-richard"]').first(),
     ).toBeVisible();
   });
 
@@ -144,7 +150,7 @@ test.describe("Mock AI agents", () => {
 
     // Let a concurrent agent insert land while the caret sits in another block.
     await expect
-      .poll(() => snapshotText(page).then((s) => s.includes("agent-1")))
+      .poll(() => snapshotText(page).then((s) => s.includes("agent-richard")))
       .toBe(true);
 
     const after = await anchorOffset(page);
@@ -156,7 +162,7 @@ test.describe("Mock AI agents", () => {
   // Rubric: "Rejecting one agent (that agent peer's own UndoManager.undo())
   // removes that mock agent's contribution without touching the other agent's
   // edits or the visitor's edits — Loro's undo is scoped to each peer."
-  test("rejecting agent-1 removes only its contribution, leaving agent-2 and visitor text", async ({
+  test("rejecting agent-richard removes only its contribution, leaving agent-jared and visitor text", async ({
     page,
   }) => {
     await page.goto(`/?example=${AGENT_EXAMPLE}&agents=2`);
@@ -168,21 +174,21 @@ test.describe("Mock AI agents", () => {
 
     // Wait for both scripted agents to have streamed their sentences.
     await expect
-      .poll(() => snapshotText(page).then((s) => s.includes("agent-1")))
+      .poll(() => snapshotText(page).then((s) => s.includes("agent-richard")))
       .toBe(true);
     await expect
-      .poll(() => snapshotText(page).then((s) => s.includes("agent-2")))
+      .poll(() => snapshotText(page).then((s) => s.includes("agent-jared")))
       .toBe(true);
 
-    await page.locator('[data-agent-reject="agent-1"]').click();
+    await page.locator('[data-agent-reject="agent-richard"]').click();
 
-    // agent-1's contribution is undone via that peer's own UndoManager;
-    // agent-2's edits and the visitor's text are untouched.
+    // agent-richard's contribution is undone via that peer's own UndoManager;
+    // agent-jared's edits and the visitor's text are untouched.
     await expect
-      .poll(() => snapshotText(page).then((s) => s.includes("agent-1")))
+      .poll(() => snapshotText(page).then((s) => s.includes("agent-richard")))
       .toBe(false);
     await expect
-      .poll(() => snapshotText(page).then((s) => s.includes("agent-2")))
+      .poll(() => snapshotText(page).then((s) => s.includes("agent-jared")))
       .toBe(true);
     await expect
       .poll(() => snapshotText(page).then((s) => s.includes("visitor-keepme")))
@@ -205,10 +211,10 @@ test.describe("Mock AI agents", () => {
     // Let all three agents stream.
     await expect(page.locator("span.weaver-agent-pending").first()).toBeVisible();
     await expect
-      .poll(() => snapshotText(page).then((s) => s.includes("agent-1")))
+      .poll(() => snapshotText(page).then((s) => s.includes("agent-richard")))
       .toBe(true);
     await expect
-      .poll(() => snapshotText(page).then((s) => s.includes("agent-3")))
+      .poll(() => snapshotText(page).then((s) => s.includes("agent-erlich")))
       .toBe(true);
 
     expect(aiRequests, aiRequests.join("\n")).toEqual([]);

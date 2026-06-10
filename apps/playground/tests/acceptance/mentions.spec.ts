@@ -98,7 +98,7 @@ test.describe("@-mention typeahead", () => {
 
     await options.nth(2).click();
     const chip = page.locator(".weaver-mention");
-    await expect(chip).toHaveAttribute("data-mention-user-id", "agent-3");
+    await expect(chip).toHaveAttribute("data-mention-user-id", "agent-erlich");
     await expect(chip).toHaveAttribute("data-mention-kind", "agent");
   });
 
