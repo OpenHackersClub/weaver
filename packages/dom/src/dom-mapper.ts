@@ -95,10 +95,11 @@ export const wrapWithMarks = (
     const span = doc.createElement("span");
     span.className = "weaver-mention";
     const val = attrs["mention"] as
-      | { userId?: string; label?: string }
+      | { userId?: string; label?: string; kind?: string }
       | undefined;
     if (val?.userId) span.setAttribute("data-mention-user-id", val.userId);
     if (val?.label) span.setAttribute("data-mention-label", val.label);
+    if (val?.kind) span.setAttribute("data-mention-kind", val.kind);
     span.appendChild(node);
     node = span;
   }

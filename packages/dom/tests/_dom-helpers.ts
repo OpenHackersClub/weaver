@@ -1,5 +1,9 @@
 import { createEditor, type Editor } from "@weaver/core";
-import { attachEditor, type AttachedBridge } from "../src/index.js";
+import {
+  attachEditor,
+  type AttachedBridge,
+  type BridgeOptions,
+} from "../src/index.js";
 
 export interface DomFixture {
   readonly editor: Editor;
@@ -51,11 +55,11 @@ const placeCaretAtEnd = (host: HTMLElement): void => {
   sel.addRange(r);
 };
 
-export const setupDom = (): DomFixture => {
+export const setupDom = (options: BridgeOptions = {}): DomFixture => {
   const editor = createEditor({ origin: "user" });
   const host = document.createElement("div");
   document.body.appendChild(host);
-  const bridge = attachEditor(editor, host);
+  const bridge = attachEditor(editor, host, options);
   host.focus();
   placeCaretAtEnd(host);
 

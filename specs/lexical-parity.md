@@ -28,7 +28,7 @@ Lexical's `node` is weaver's **block** (`LoroTreeNode` + `LoroMap` of typed attr
 | `TextNode` (text leaves with format) | `LoroText` + marks | ✅ | Inline text is `LoroText`; format is CRDT `mark/unmark`. Lexical's "format bitmask" is encoded as overlapping marks. |
 | `LineBreakNode` (soft break) | inline ` ` or `<br>` analog inside `LoroText` | ✅ | Soft break inside a text-bearing block. |
 | `ElementNode` (custom container) | plugin-registered block kind with `children: true` | 🔁 | Plugins extend the kind catalog. |
-| `DecoratorNode` (React-rendered atomic node) | block kind with `hasInline: false`, plugin-supplied React adapter | ✅ | E.g., `image`, `embed`, `mention`, `divider`. |
+| `DecoratorNode` (React-rendered atomic node) | block kind with `hasInline: false`, plugin-supplied React adapter | ✅ | E.g., `image`, `embed`, `divider`. |
 | `HeadingNode` | `heading` (level 1–3 UI; 1–6 schema) | ✅ | |
 | `QuoteNode` | `quote` | ✅ | Single-level only in v1. |
 | `ListNode` (ul / ol) | `bullet-list-item`, `numbered-list-item` (nesting via tree children) | ✅ | Lexical models the list container as one node; weaver models each item as a block whose children are its nested items. Functionally equivalent. |
@@ -114,7 +114,7 @@ Lexical ships ~30 packages under `@lexical/*`. weaver bundles equivalent behavio
 | `CodeHighlightPlugin` | core via tree-sitter for `code` blocks | ✅ |
 | `TablePlugin` | core; `table` kind is built-in | ✅ |
 | `EmojiPickerPlugin` | plugin (`@weaver/plugins-emoji`) | 🔁 |
-| `TypeaheadMenuPlugin` (the underpinning Lexical actually ships; "MentionsPlugin" in the wild is a playground example built on top) | core; `mention` is a built-in inline-mode block kind; typeahead menu UI lives in `@weaver/react` | ✅ |
+| `TypeaheadMenuPlugin` (the underpinning Lexical actually ships; "MentionsPlugin" in the wild is a playground example built on top) | core; `mention` is a built-in inline **mark** (`{ userId, label, kind? }`, `expand: "none"`); trigger detection in `@weaver/dom`, typeahead menu UI in `@weaver/react` (`useMentions` + `MentionMenu`) — see `mentions.md` | ✅ |
 | `HashtagPlugin` | plugin if needed | 🔁 |
 | `DraggableBlockPlugin` (block handle drag) | core UI (`@weaver/react`'s drag handle) | ✅ |
 | `FloatingTextFormatToolbarPlugin` (Lexical playground) | core UI (floating toolbar in `@weaver/react`) | ✅ |

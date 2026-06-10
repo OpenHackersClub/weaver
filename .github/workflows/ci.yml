@@ -62,6 +62,9 @@ jobs:
       - name: Unit tests — @weaver/core
         run: pnpm --filter @weaver/core test
 
+      - name: Unit tests — @weaver/dom
+        run: pnpm --filter @weaver/dom test
+
       - name: Unit tests — @weaver/sync
         run: pnpm --filter @weaver/sync test
 

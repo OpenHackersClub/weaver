@@ -12,10 +12,16 @@ export {
 export {
   type DomCaret,
   type DomRange,
+  caretRect,
   readDomSelection,
   writeDomSelection,
   placeCaret,
 } from "./selection-mapper.js";
+export {
+  type MentionTrigger,
+  detectMentionTrigger,
+  mentionTriggersEqual,
+} from "./mention-trigger.js";
 export {
   type PresenceCursor,
   type PresenceOverlay,

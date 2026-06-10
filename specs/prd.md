@@ -78,7 +78,7 @@ A user drafts on a flight (no network). All edits go into the local LoroDoc, per
 
 ### Block kinds shipped in v1
 
-`paragraph`, `heading` (levels 1–3 UI; 1–6 schema), `bullet-list-item`, `numbered-list-item`, `to-do`, `toggle`, `quote`, `callout`, `code` (tree-sitter highlighting), `image`, `embed`, `mention`, `divider`, `table` (block-table, not Database).
+`paragraph`, `heading` (levels 1–3 UI; 1–6 schema), `bullet-list-item`, `numbered-list-item`, `to-do`, `toggle`, `quote`, `callout`, `code` (tree-sitter highlighting), `image`, `embed`, `divider`, `table` (block-table, not Database). Mentions ship as an inline `mention` *mark* over the label text, not a block kind ([`mentions.md`](mentions.md)).
 
 Full list in [`block-model.md` §3](block-model.md); decision rationale in [ADR 0002](adr/0002-notion-style-block-model.md).
 

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { getBlock, getChildren, rootId } from "@weaver/core";
-import { EditorRoot, useEditor } from "@weaver/react";
+import { EditorRoot, MentionMenu, useEditor, useMentions } from "@weaver/react";
 import { EXAMPLES, seedExample, type ExampleId } from "./examples.js";
+import { PLAYGROUND_PRINCIPALS } from "./principals.js";
+import { MentionsLog } from "./mentions-log.js";
 import { readUrlState, writeUrlState, type DebugPanelId } from "./url-state.js";
 import { DebugPanels } from "./debug-panels.js";
 import { createRuntime } from "./agents/runtime.js";
@@ -40,11 +42,33 @@ const installDebugGlobals = (editor: ReturnType<typeof useEditor>) => {
     version: () => Object.fromEntries(editor.doc.version().toJSON()),
     tree: () => buildTree(rootId(editor)),
   };
+  // Programmatic mention insert — lets acceptance tests exercise the
+  // MentionCreated debounce contract without racing real keystrokes.
+  const wm = window as unknown as {
+    __weaver_mention_insert?: (
+      blockId: string,
+      at: number,
+      id: string,
+      label: string,
+    ) => void;
+  };
+  wm.__weaver_mention_insert = (blockId, at, id, label) => {
+    editor.commands.text.insertMention({
+      blockId,
+      range: { start: at, end: at },
+      principal: {
+        id,
+        label,
+        kind: id.startsWith("agent") ? "agent" : "user",
+      },
+    });
+  };
 };
 
 export const App = () => {
   const initial = useMemo(() => readUrlState(window.location.search), []);
   const editor = useEditor({ origin: "user" });
+  const mentions = useMentions(editor, { principals: PLAYGROUND_PRINCIPALS });
   const [runtime] = useState(() => createRuntime(editor));
   const [example, setExample] = useState<ExampleId>(initial.example);
   const [debug, setDebug] = useState<ReadonlySet<DebugPanelId>>(initial.debug);
@@ -129,6 +153,7 @@ export const App = () => {
             </ul>
           </section>
           <AgentsPanel runtime={runtime} />
+          <MentionsLog editor={editor} />
           <section>
             <h2>Debug overlays</h2>
             <ul className="debug-list">
@@ -157,7 +182,14 @@ export const App = () => {
           </section>
         </nav>
         <main className="surface">
-          <EditorRoot editor={editor} className="editor" autoFocus />
+          <EditorRoot
+            editor={editor}
+            className="editor"
+            autoFocus
+            bridgeOptions={mentions.bridgeOptions}
+            hostRef={mentions.hostRef}
+          />
+          <MentionMenu mentions={mentions} />
           <PresenceLayer editor={editor} presence={runtime.presence} />
         </main>
         <DebugPanels editor={editor} opLogEditors={opLogEditors} enabled={debug} />
