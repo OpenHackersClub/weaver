@@ -228,7 +228,11 @@ export const App = () => {
             hostRef={mentions.hostRef}
           />
           <MentionMenu mentions={mentions} />
-          <PresenceLayer editor={editor} presence={runtime.presence} />
+          {/* Mock-agent carets are a single-tab demo affordance; in collab mode
+              CollabSession owns the overlay (one layer per host), so skip this. */}
+          {collab ? null : (
+            <PresenceLayer editor={editor} presence={runtime.presence} />
+          )}
           {collab ? (
             <CollabSession
               editor={editor}

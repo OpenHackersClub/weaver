@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Effect } from "effect";
 import {
   createPresenceHub,
@@ -48,7 +48,17 @@ export const CollabSession = ({
   const [state, setState] = useState<"connecting" | "live" | "error">(
     "connecting",
   );
+  // Called for its publish/heartbeat side effect (publishes `self` into the hub
+  // and re-`set`s on an interval); the returned roster is rendered by the
+  // facepile from the hub directly, so the value here is intentionally unused.
   usePresence(hub, { self });
+
+  // The sync handle's teardown (`handle.dispose()`) is async and internally
+  // unsubscribes from the hub's EphemeralStore. The hub-dispose effect below
+  // must await that in-flight teardown before destroying the WASM store —
+  // disposing the hub first would free the store out from under the pending
+  // unsubscribe (use-after-free / unhandled rejection on unmount).
+  const disposingRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let handle: SyncHandle | null = null;
@@ -66,7 +76,7 @@ export const CollabSession = ({
     )
       .then((h) => {
         if (cancelled) {
-          void Effect.runPromise(h.dispose());
+          disposingRef.current = Effect.runPromise(h.dispose());
           return;
         }
         handle = h;
@@ -78,11 +88,26 @@ export const CollabSession = ({
       });
     return () => {
       cancelled = true;
-      if (handle) void Effect.runPromise(handle.dispose());
+      // Record the in-flight teardown so hub disposal can await it. A
+      // wsUrl/docId change re-runs this effect (new sync wiring) but must NOT
+      // destroy the hub — that only happens on real unmount, below.
+      if (handle) disposingRef.current = Effect.runPromise(handle.dispose());
     };
   }, [editor, hub, wsUrl, docId]);
 
-  useEffect(() => () => hub.dispose(), [hub]);
+  // Real-unmount only (empty deps): await any in-flight sync teardown, THEN
+  // destroy the hub's WASM store. Ordering matters — see disposingRef above.
+  useEffect(
+    () => () => {
+      void disposingRef.current
+        .then(() => hub.dispose())
+        .catch((error: unknown) => {
+          console.warn("[playground/collab] dispose failed", error);
+          hub.dispose();
+        });
+    },
+    [hub],
+  );
 
   // A genuinely fresh room has no blocks anywhere (the collab editor mounts
   // with `seed: false`). Give the catch-up snapshot a beat to land, then seed
