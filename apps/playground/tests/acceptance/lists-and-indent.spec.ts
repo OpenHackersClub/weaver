@@ -1,18 +1,19 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * List + indent/outdent acceptance tests — TDD red.
+ * List + indent/outdent acceptance tests.
  *
- * `block.indent` / `block.outdent` and the Tab / Shift-Tab keymap are not
- * yet implemented, nor are the `- ` / `1. ` / `[ ] ` markdown shortcuts.
+ * `block.indent` / `block.outdent`, the Tab / Shift-Tab keymap, and the
+ * `- ` / `1. ` / `[ ] ` markdown shortcuts are implemented.
  * `specs/lexical-parity.md` §1 models nested lists as the block tree's
  * children; §3 commits to INDENT/OUTDENT. Mirrors Lexical's
  * `Indentation.spec.mjs` and `List.spec.mjs`.
  *
- * NOTE: the DOM renderer (`reconcileTopLevel`) currently renders only the
- * root's children flat — nested blocks are NOT DOM descendants. So indent
- * assertions read the *block tree* via `window.__weaver_debug.tree()` (the
- * LoroDoc, the single source of truth), not the rendered DOM.
+ * The DOM renders the whole tree as flat siblings in document order with a
+ * `data-depth` attribute (see `block-boundaries.spec.ts` for the DOM-level
+ * guards). The assertions here read the *block tree* via
+ * `window.__weaver_debug.tree()` — the LoroDoc, the single source of truth —
+ * so structural nesting is verified independently of the renderer.
  */
 
 interface DebugTreeNode {

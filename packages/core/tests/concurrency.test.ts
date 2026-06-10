@@ -158,7 +158,7 @@ describe("@weaver/core / concurrency — structural ops", () => {
 });
 
 describe("@weaver/core / concurrency — undo across peers (ADR 0001)", () => {
-  it("user undo does not roll back agent edits to the same block — TDD red", () => {
+  it("user undo does not roll back agent edits to the same block", () => {
     const u = createEditor({ origin: "user" });
     const g = createEditor({ origin: "agent", seed: false });
     syncBoth(u, g);

@@ -9,8 +9,6 @@ import { setupDom, type DomFixture } from "./_dom-helpers.js";
  * set — these tests pin the contract weaver commits to in
  * `specs/lexical-parity.md` §4 (MarkdownShortcutPlugin →
  * `@weaver/plugins-markdown`).
- *
- * Most of these are TDD red until each shortcut lands.
  */
 
 let f: DomFixture;
@@ -107,21 +105,21 @@ describe("@weaver/dom / markdown shortcuts — block transforms", () => {
   // `BlockKindSchema` (packages/core/src/block.ts). Turning these green
   // requires extending the schema first (an ADR 0002-adjacent change), then
   // wiring the shortcut — flagged so the implementer knows the scope.
-  it("` ``` ` opens a code block — needs `code` added to BlockKindSchema (TDD red)", () => {
+  it("` ``` ` opens a code block", () => {
     // 3 backticks + space; tested separately to avoid template-literal noise.
     f.type("```");
     f.type(" ");
     expect(f.blockKinds()).toEqual(["code"]);
   });
 
-  it("`--- ` inserts a divider — needs `divider` added to BlockKindSchema (TDD red)", () => {
+  it("`--- ` inserts a divider", () => {
     f.type("--- ");
     // Either the paragraph becomes a divider, or a divider block is inserted
     // and the paragraph is cleared/removed.
     expect(f.blockKinds()).toContain("divider");
   });
 
-  it("`*** ` inserts a divider — needs `divider` added to BlockKindSchema (TDD red)", () => {
+  it("`*** ` inserts a divider", () => {
     f.type("*** ");
     expect(f.blockKinds()).toContain("divider");
   });
@@ -148,7 +146,7 @@ describe("@weaver/dom / markdown shortcuts — edge cases", () => {
   });
 });
 
-describe("@weaver/dom / markdown shortcuts — inline (TDD red)", () => {
+describe("@weaver/dom / markdown shortcuts — inline", () => {
   it("typing `**bold** ` applies a bold mark to 'bold' and removes the `**` delimiters", () => {
     f.type("**bold** ");
     const id = f.blockEls()[0]!.getAttribute("data-block-id")!;

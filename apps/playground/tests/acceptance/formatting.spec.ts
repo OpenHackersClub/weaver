@@ -3,8 +3,8 @@ import { test, expect, type Page } from "@playwright/test";
 /**
  * Inline-formatting + selection acceptance tests.
  *
- * Ctrl+B/I/U are wired in the DOM bridge today; Ctrl+A select-all and
- * clear-formatting are TDD-red targets from `specs/lexical-parity.md` §3.
+ * Ctrl+B/I/U, Ctrl+A select-all, and Ctrl+\ clear-formatting are all wired
+ * in the DOM bridge (`specs/lexical-parity.md` §3).
  */
 
 const EMPTY_DOC_URL = "/?example=empty";
@@ -67,10 +67,8 @@ test.describe("keyboard formatting on a selection", () => {
 });
 
 test.describe("select-all spans the whole document", () => {
-  // TDD red — and a bigger lift than a keymap entry: `text.toggleMark` is
-  // single-block by signature `(blockId, range, mark)`, and the DOM bridge's
-  // `computeMarkRangeWithinBlock` rejects cross-block ranges. Turning this
-  // green needs a multi-block formatting path, not just a Ctrl+A handler.
+  // Cross-block formatting: `handleToggleMark` resolves the DOM range into
+  // per-block segments and flips only the segments that need it.
   test("Ctrl+A then Ctrl+B bolds text across multiple blocks", async ({
     page,
   }) => {
@@ -93,8 +91,7 @@ test.describe("clear formatting", () => {
   test("a clear-formatting shortcut strips marks from the selection", async ({
     page,
   }) => {
-    // TDD red — no clear-formatting command/keymap yet. Lexical binds this to
-    // Ctrl+\ in its playground.
+    // Ctrl+\ — same binding as Lexical's playground.
     await page.goto(EMPTY_DOC_URL);
     await focusEditor(page);
     await page.keyboard.type("hello");

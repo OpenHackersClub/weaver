@@ -1,4 +1,4 @@
-import { createEditor, type Editor } from "@weaver/core";
+import { createEditor, getChildren, type Editor } from "@weaver/core";
 import {
   attachEditor,
   type AttachedBridge,
@@ -15,6 +15,8 @@ export interface DomFixture {
   blockEls(): HTMLElement[];
   blockKinds(): string[];
   blockTexts(): string[];
+  /** Child block ids of `id` straight from the LoroDoc tree. */
+  getChildren(id: string): string[];
   destroy(): void;
 }
 
@@ -91,6 +93,9 @@ export const setupDom = (options: BridgeOptions = {}): DomFixture => {
     },
     blockKinds() {
       return this.blockEls().map((el) => el.getAttribute("data-kind") ?? "");
+    },
+    getChildren(id: string) {
+      return getChildren(editor, id);
     },
     blockTexts() {
       // Read from the LoroDoc (the single source of truth) keyed by the DOM

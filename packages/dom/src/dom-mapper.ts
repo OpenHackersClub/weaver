@@ -5,6 +5,10 @@ import { Match } from "effect";
 const BLOCK_ATTR = "data-block-id";
 const KIND_ATTR = "data-kind";
 const LEVEL_ATTR = "data-level";
+const DEPTH_ATTR = "data-depth";
+/** Visual indent per nesting level. Functional (not cosmetic) — without it a
+ *  nested block is indistinguishable from its parent's sibling. */
+const INDENT_EM_PER_DEPTH = 1.5;
 
 // `paragraph`, `image`, `embed`, `toggle`, and the `table` family fall
 // through to `<p>` today — they still need dedicated DOM mapping (tracked
@@ -273,24 +277,47 @@ const updateBlockElement = (
 };
 
 /**
- * Recursively render a block and its children into `host`, preserving
- * element identity on re-render (fast path for single-keystroke reconciles).
- * Nested child blocks are rendered as flat siblings under host so the DOM
- * always reflects document order — even for indented/nested blocks.
+ * The whole block tree flattened depth-first into document order, with the
+ * nesting depth of each block. This is the DOM rendering order: nested
+ * (indented) blocks render as flat siblings under the host, indented via
+ * `data-depth`, so the DOM always reflects document order.
  */
-const reconcileChildren = (
+export const documentOrderWithDepth = (
   editor: Editor,
-  host: HTMLElement,
-  parentId: BlockId,
-): void => {
-  const desired = getChildren(editor, parentId);
+): Array<{ id: BlockId; depth: number }> => {
+  const out: Array<{ id: BlockId; depth: number }> = [];
+  const visit = (parentId: BlockId, depth: number): void => {
+    for (const id of getChildren(editor, parentId)) {
+      out.push({ id, depth });
+      visit(id, depth + 1);
+    }
+  };
+  visit(rootId(editor), 0);
+  return out;
+};
+
+const syncDepth = (el: HTMLElement, depth: number): void => {
+  if (el.getAttribute(DEPTH_ATTR) !== String(depth)) {
+    el.setAttribute(DEPTH_ATTR, String(depth));
+    el.style.marginLeft = depth > 0 ? `${depth * INDENT_EM_PER_DEPTH}em` : "";
+  }
+};
+
+/**
+ * Render every block — including nested children — into `host` in document
+ * order, preserving element identity on re-render (fast path for
+ * single-keystroke reconciles).
+ */
+export const reconcileTopLevel = (editor: Editor, host: HTMLElement): void => {
+  const desired = documentOrderWithDepth(editor);
+  const desiredIds = new Set(desired.map((d) => d.id));
   const present = new Map<BlockId, HTMLElement>();
   for (const child of Array.from(host.children)) {
     const id = (child as HTMLElement).getAttribute(BLOCK_ATTR);
     if (id) present.set(id, child as HTMLElement);
   }
   let prevSibling: HTMLElement | null = null;
-  for (const id of desired) {
+  for (const { id, depth } of desired) {
     let el = present.get(id);
     if (!el) {
       el = renderBlockElement(editor, id);
@@ -306,15 +333,12 @@ const reconcileChildren = (
       el = updateBlockElement(editor, el, id);
       present.set(id, el);
     }
+    syncDepth(el, depth);
     prevSibling = el;
   }
   for (const [id, el] of present) {
-    if (!desired.includes(id)) el.remove();
+    if (!desiredIds.has(id)) el.remove();
   }
-};
-
-export const reconcileTopLevel = (editor: Editor, host: HTMLElement): void => {
-  reconcileChildren(editor, host, rootId(editor));
 };
 
 export const findBlockElement = (host: HTMLElement, blockId: BlockId): HTMLElement | null =>

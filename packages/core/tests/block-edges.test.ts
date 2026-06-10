@@ -104,6 +104,76 @@ describe("@weaver/core / block.merge — edge cases", () => {
     expect(editor.commands.text.read(firstId)).toBe("");
     editor.dispose();
   });
+
+  it("merging a block that has nested children adopts them under prev (no data loss)", () => {
+    // Regression: `tree.delete(next)` removes the whole subtree, so merging a
+    // block whose children were nested (via indent) silently destroyed them.
+    const editor = createEditor();
+    const root = rootId(editor);
+    const firstId = getChildren(editor, root)[0]!;
+    editor.commands.text.insert({ blockId: firstId, offset: 0, value: "first" });
+    const secondId = editor.commands.block.insert({
+      parentId: root,
+      index: 1,
+      kind: "paragraph",
+      attrs: {},
+    });
+    editor.commands.text.insert({ blockId: secondId, offset: 0, value: "second" });
+    const childId = editor.commands.block.insert({
+      parentId: secondId,
+      index: 0,
+      kind: "bullet-list-item",
+      attrs: {},
+    });
+    editor.commands.text.insert({ blockId: childId, offset: 0, value: "nested" });
+
+    editor.commands.block.merge({ prevId: firstId, nextId: secondId });
+
+    expect(editor.commands.text.read(firstId)).toBe("firstsecond");
+    // The nested child survives, reparented under the merge target.
+    expect(getChildren(editor, firstId)).toEqual([childId]);
+    expect(editor.commands.text.read(childId)).toBe("nested");
+    editor.dispose();
+  });
+
+  it("merge adoption appends after prev's existing children, in order", () => {
+    const editor = createEditor();
+    const root = rootId(editor);
+    const firstId = getChildren(editor, root)[0]!;
+    const existingChild = editor.commands.block.insert({
+      parentId: firstId,
+      index: 0,
+      kind: "paragraph",
+      attrs: {},
+    });
+    const secondId = editor.commands.block.insert({
+      parentId: root,
+      index: 1,
+      kind: "paragraph",
+      attrs: {},
+    });
+    const adoptedA = editor.commands.block.insert({
+      parentId: secondId,
+      index: 0,
+      kind: "paragraph",
+      attrs: {},
+    });
+    const adoptedB = editor.commands.block.insert({
+      parentId: secondId,
+      index: 1,
+      kind: "paragraph",
+      attrs: {},
+    });
+
+    editor.commands.block.merge({ prevId: firstId, nextId: secondId });
+
+    expect(getChildren(editor, firstId)).toEqual([
+      existingChild,
+      adoptedA,
+      adoptedB,
+    ]);
+    editor.dispose();
+  });
 });
 
 describe("@weaver/core / block.transform — kind & attr changes", () => {
@@ -151,9 +221,8 @@ describe("@weaver/core / block.transform — kind & attr changes", () => {
 
 describe("@weaver/core / block.delete — root guard", () => {
   it("deleting the very last block under root re-seeds an empty paragraph", () => {
-    // Lexical forbids an empty root; weaver should mirror that invariant so
-    // the editing surface never has zero blocks. TDD red — the current impl
-    // happily leaves the root empty.
+    // Lexical forbids an empty root; weaver mirrors that invariant so the
+    // editing surface never has zero blocks (`block.delete` re-seeds).
     const editor = createEditor();
     const root = rootId(editor);
     const only = getChildren(editor, root)[0]!;
@@ -175,7 +244,7 @@ describe("@weaver/core / block.delete — root guard", () => {
   });
 });
 
-describe("@weaver/core / block.indent / block.outdent (list nesting) — TDD red", () => {
+describe("@weaver/core / block.indent / block.outdent (list nesting)", () => {
   // Use `seed: false` so root has exactly the blocks the test sets up — no
   // stray seed paragraph to widen the expected tree.
   it("indent moves a block to become a child of its previous sibling", () => {
@@ -275,7 +344,7 @@ describe("@weaver/core / block.indent / block.outdent (list nesting) — TDD red
   });
 });
 
-describe("@weaver/core / editor.clear, setEditable, focus, blur — TDD red", () => {
+describe("@weaver/core / editor.clear, setEditable, focus, blur", () => {
   it("editor.clear() replaces all content with the empty-doc template", () => {
     const editor = createEditor();
     const root = rootId(editor);

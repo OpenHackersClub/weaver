@@ -1,13 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
 
 /**
- * Mock AI agents — acceptance tests (TDD red).
+ * Mock AI agents — acceptance tests.
  *
- * The "Mock AI agents" feature (`specs/playground.md` § Mock AI agents and its
- * "### Mock AI agents" outcome-rubric subsection, plus `specs/ai-agent.md` §5)
- * is NOT built yet. Every test here is EXPECTED TO FAIL until the feature
- * lands — they encode the spec's rubric so the implementation can be graded
- * against them.
+ * These encode the outcome rubric of the "Mock AI agents" feature
+ * (`specs/playground.md` § Mock AI agents and its "### Mock AI agents"
+ * outcome-rubric subsection, plus `specs/ai-agent.md` §5) — the
+ * implementation is graded against them.
  *
  * Each `test` below maps to one rubric line. Tests use ONLY the deployed shape
  * of the app (DOM selectors + URL params + the `window.__weaver_debug` global
