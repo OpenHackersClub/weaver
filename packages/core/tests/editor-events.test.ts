@@ -142,3 +142,50 @@ describe("@weaver/core / onHistoryChange", () => {
     editor.dispose();
   });
 });
+
+describe("@weaver/core / selection after undo/redo", () => {
+  it("clamps the selection when undo shortens the block", () => {
+    const editor = createEditor();
+    const id = getChildren(editor, rootId(editor))[0]!;
+    editor.commands.text.insert({ blockId: id, offset: 0, value: "ab" });
+    editor.commands.history.flushMergeWindow();
+    editor.commands.text.insert({ blockId: id, offset: 2, value: "cdef" });
+    editor.commands.selection.collapse(id, 6);
+    editor.commands.history.undo(); // text back to "ab"
+    const sel = editor.commands.selection.get();
+    expect(sel).toEqual({
+      anchor: { blockId: id, offset: 2 },
+      focus: { blockId: id, offset: 2 },
+    });
+    editor.dispose();
+  });
+
+  it("drops the selection when undo removes its block", () => {
+    const editor = createEditor();
+    const root = rootId(editor);
+    const first = getChildren(editor, root)[0]!;
+    editor.commands.text.insert({ blockId: first, offset: 0, value: "a" });
+    editor.commands.history.flushMergeWindow();
+    const second = editor.commands.block.insert({
+      parentId: root,
+      index: 1,
+      kind: "paragraph",
+    });
+    editor.commands.selection.collapse(second, 0);
+    editor.commands.history.undo(); // removes `second`
+    expect(editor.commands.selection.get()).toBeNull();
+    editor.dispose();
+  });
+
+  it("does NOT notify history listeners when there is nothing to undo", () => {
+    const editor = createEditor();
+    let calls = 0;
+    editor.onHistoryChange(() => {
+      calls += 1;
+    });
+    expect(editor.commands.history.undo()).toBe(false);
+    expect(editor.commands.history.redo()).toBe(false);
+    expect(calls).toBe(0);
+    editor.dispose();
+  });
+});

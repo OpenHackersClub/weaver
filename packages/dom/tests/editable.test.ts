@@ -66,3 +66,18 @@ describe("@weaver/dom / read-only mode", () => {
     expect(f.blockTexts()).toEqual(["ab"]);
   });
 });
+
+describe("@weaver/dom / read-only mode — IME", () => {
+  it("a composition finalized after setEditable(false) does not mutate the doc", () => {
+    f.type("hello");
+    // Composition starts while editable…
+    f.host.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    // …but the editor flips read-only mid-composition (programmatic toggle).
+    f.editor.setEditable(false);
+    f.host.dispatchEvent(
+      new CompositionEvent("compositionend", { data: "猫", bubbles: true }),
+    );
+    expect(f.blockTexts()).toEqual(["hello"]);
+    f.editor.setEditable(true);
+  });
+});

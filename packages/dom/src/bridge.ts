@@ -528,6 +528,16 @@ export const attachEditor = (
 
   const onCompositionEnd = (ev: CompositionEvent): void => {
     composing = false;
+    // Read-only can flip MID-composition (programmatic toggle): beforeinput
+    // is skipped while composing, so this is the only place the guard can
+    // catch a finalized IME insert. contenteditable=false alone is not a
+    // reliable IME suppressor across browsers.
+    if (!editor.isEditable()) {
+      composedTarget = null;
+      composedInitial = "";
+      flushRerender();
+      return;
+    }
     const final = ev.data ?? "";
     if (composedTarget && final.length > 0) {
       editor.commands.text.insert({

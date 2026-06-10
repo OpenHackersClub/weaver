@@ -545,6 +545,37 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
     notify(selectionListeners);
   };
 
+  /**
+   * Re-validate the selection against the (changed) document — undo/redo can
+   * remove the selected block or shorten its text, and a stale selection
+   * would point `useSelection` consumers at content that no longer exists.
+   * Missing block → drop the selection; surviving block → clamp offsets.
+   */
+  const reconcileSelectionWithDoc = (): void => {
+    const sel = currentSelection;
+    if (!sel) return;
+    const anchorNode = getNode(tree, sel.anchor.blockId);
+    const focusNode = getNode(tree, sel.focus.blockId);
+    if (
+      !anchorNode ||
+      anchorNode.isDeleted() ||
+      !focusNode ||
+      focusNode.isDeleted()
+    ) {
+      setCurrentSelection(null);
+      return;
+    }
+    const clamp = (p: SelectionRange["anchor"]) => {
+      const len = textLengthOf(p.blockId);
+      return p.offset > len ? { blockId: p.blockId, offset: len } : p;
+    };
+    const anchor = clamp(sel.anchor);
+    const focus = clamp(sel.focus);
+    if (anchor !== sel.anchor || focus !== sel.focus) {
+      setCurrentSelection({ anchor, focus });
+    }
+  };
+
   // Undo-step grouping: consecutive `text.insert`/`text.delete` ops merge into
   // a single step (one undo per typing burst); every other op forces a fresh
   // step. `flushMergeWindow` resets the run so the next text op starts fresh.
@@ -1025,12 +1056,18 @@ export const createEditor = (options: EditorOptions = {}): Editor => {
     history: {
       undo: () => {
         const did = undo?.undo() ?? false;
-        notify(historyListeners);
+        if (did) {
+          reconcileSelectionWithDoc();
+          notify(historyListeners);
+        }
         return did;
       },
       redo: () => {
         const did = undo?.redo() ?? false;
-        notify(historyListeners);
+        if (did) {
+          reconcileSelectionWithDoc();
+          notify(historyListeners);
+        }
         return did;
       },
       canUndo: () => undo?.canUndo() ?? false,

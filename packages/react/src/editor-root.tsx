@@ -23,7 +23,10 @@ export interface EditorRootProps {
   readonly hostRef?: MutableRefObject<HTMLDivElement | null>;
   /**
    * Declarative read-only toggle (lexical-parity §5). Omit to leave the
-   * editor's own `setEditable` state untouched.
+   * editor's own `setEditable` state untouched. When set, the prop owns the
+   * flag: an imperative `editor.setEditable()` call made while mounted
+   * persists only until the next render passes this prop again — mixing the
+   * two means the prop wins.
    */
   readonly editable?: boolean;
 }

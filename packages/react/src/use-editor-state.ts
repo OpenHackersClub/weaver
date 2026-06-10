@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useRef, useSyncExternalStore } from "react";
 import type { Editor, SelectionRange } from "@weaver/core";
 
 /**
@@ -45,17 +45,21 @@ export const useUndoState = (editor: Editor): UndoState => {
     },
     [editor],
   );
-  const canUndo = useSyncExternalStore(
-    subscribe,
-    () => editor.commands.history.canUndo(),
-    () => editor.commands.history.canUndo(),
-  );
-  const canRedo = useSyncExternalStore(
-    subscribe,
-    () => editor.commands.history.canRedo(),
-    () => editor.commands.history.canRedo(),
-  );
-  return { canUndo, canRedo };
+  // One store, one subscription (two stores would register doc + history
+  // listeners twice per mount). The snapshot object is cached and reused
+  // while both flags are unchanged — useSyncExternalStore needs a stable
+  // reference or it re-renders on every check.
+  const cache = useRef<UndoState>({ canUndo: false, canRedo: false });
+  const getSnapshot = useCallback((): UndoState => {
+    const canUndo = editor.commands.history.canUndo();
+    const canRedo = editor.commands.history.canRedo();
+    const prev = cache.current;
+    if (prev.canUndo !== canUndo || prev.canRedo !== canRedo) {
+      cache.current = { canUndo, canRedo };
+    }
+    return cache.current;
+  }, [editor]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 };
 
 /** Whether the editor accepts edits — Lexical's `useLexicalEditable`. */

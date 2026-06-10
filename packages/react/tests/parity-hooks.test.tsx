@@ -127,3 +127,27 @@ describe("@weaver/react / useEditable", () => {
     editor.dispose();
   });
 });
+
+describe("@weaver/react / useSelection after undo", () => {
+  it("does not go stale when undo removes the selected block", () => {
+    const { editor } = seededEditor("a");
+    const root = rootId(editor);
+    editor.commands.history.flushMergeWindow();
+    const second = editor.commands.block.insert({
+      parentId: root,
+      index: 1,
+      kind: "paragraph",
+    });
+    const { result, unmount } = renderHook(() => useSelection(editor));
+    act(() => {
+      editor.commands.selection.collapse(second, 0);
+    });
+    expect(result.current?.anchor.blockId).toBe(second);
+    act(() => {
+      editor.commands.history.undo(); // removes `second`
+    });
+    expect(result.current).toBeNull();
+    unmount();
+    editor.dispose();
+  });
+});
