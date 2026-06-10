@@ -6,7 +6,7 @@ import {
 } from "@weaver/core";
 import { Match } from "effect";
 
-export type ExampleId = "empty" | "demo" | "multi" | "agent";
+export type ExampleId = "empty" | "demo" | "multi" | "agent" | "mentions";
 
 export interface ExampleDef {
   readonly id: ExampleId;
@@ -35,6 +35,12 @@ export const EXAMPLES: ReadonlyArray<ExampleDef> = [
     label: "Agent collab",
     description:
       "Mock AI agents join as CRDT peers — pre-enabled, streaming scripted edits.",
+  },
+  {
+    id: "mentions",
+    label: "Tag someone",
+    description:
+      "Type @ to tag a person or agent — every tag fires a MentionCreated event.",
   },
 ];
 
@@ -132,6 +138,24 @@ export const seedExample = (editor: Editor, id: ExampleId): void => {
       for (let i = 2; i <= 6; i++) {
         seedBlock(editor, i - 1, "paragraph", {}, `Paragraph ${i}.`);
       }
+    }),
+    Match.when("mentions", () => {
+      replaceFirstBlock(editor, "heading", { level: 1 }, "Tag someone — events demo");
+      seedBlock(
+        editor,
+        1,
+        "paragraph",
+        {},
+        "Tagging is the editor's notification primitive: inserting a mention chip emits a MentionCreated event that app code subscribes to.",
+      );
+      seedBlock(
+        editor,
+        2,
+        "paragraph",
+        {},
+        "Type @ below and pick a person or agent. Each tag pops a notification toast instantly (per-event delivery), and the Mentions panel in the sidebar logs the same events debounced — a burst arrives there as one batch.",
+      );
+      seedBlock(editor, 3, "paragraph", {}, "Try it here: ");
     }),
     Match.when("agent", () => {
       replaceFirstBlock(editor, "heading", { level: 1 }, "Agent collaboration demo");

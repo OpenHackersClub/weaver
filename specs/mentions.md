@@ -76,3 +76,4 @@ editor.events.on(
 - `packages/core/tests/insert-mention.test.ts` — atomic replace/mark/undo semantics.
 - `packages/dom/tests/mention-trigger.test.ts` — trigger scan rules + bridge lifecycle.
 - `apps/playground/tests/acceptance/mentions.spec.ts` — full browser flow: open, filter, keyboard/click insert, debounced batch delivery.
+- `apps/playground/tests/acceptance/mentions-showcase.spec.ts` — the "Tag someone" example: one tag → instant per-event toast (`MentionNotifications`, no debounce) and the same event debounced into the sidebar log; a burst → N toasts but one log batch.

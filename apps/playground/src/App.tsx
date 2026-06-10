@@ -4,6 +4,7 @@ import { EditorRoot, MentionMenu, useEditor, useMentions } from "@weaver/react";
 import { EXAMPLES, seedExample, type ExampleId } from "./examples.js";
 import { PLAYGROUND_PRINCIPALS } from "./principals.js";
 import { MentionsLog } from "./mentions-log.js";
+import { MentionNotifications } from "./mention-notifications.js";
 import { readUrlState, writeUrlState, type DebugPanelId } from "./url-state.js";
 import { DebugPanels } from "./debug-panels.js";
 import { createRuntime } from "./agents/runtime.js";
@@ -255,6 +256,7 @@ export const App = () => {
             hostRef={mentions.hostRef}
           />
           <MentionMenu mentions={mentions} />
+          <MentionNotifications editor={editor} />
           {/* One overlay per host: in collab mode CollabSession renders the
               shared hub (humans + agents); this layer covers single-user. */}
           {collab ? null : (
